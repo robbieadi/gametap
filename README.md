@@ -10,11 +10,10 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 
 | Part | State |
 |------|-------|
-| Shared code (HID, input, sender) | Unit tested |
-| Android UI and single-touch input | Run on an emulator |
-| Multi-touch | Unit tested in the tracker; **not yet tried on a device** |
-| Android HID registration | Run on an emulator; the app reaches "Waiting for a host" |
-| Android pairing and input to a Linux host | All controls tested on a Redmi Pad SE, one at a time |
+| Shared code (HID, input, sender, connection logic) | Unit tested |
+| Android app with a Linux host | Used on a Redmi Pad SE; every control tested one at a time |
+| Multi-touch | Unit tested in the tracker; used in a game on the Redmi Pad SE, not checked control by control |
+| Leaving the app and coming back | Tested on the Redmi Pad SE, see [Using it](#using-it) |
 | Windows and macOS hosts | **Not yet tested** |
 | iOS code | Compiles against the iOS SDK bindings; **never linked or run** |
 | iOS as a gamepad | **Unproven, see below** |
@@ -47,6 +46,11 @@ Set your signing team in Xcode, then run on a real device. The simulator has no 
 After the first pairing, **Start gamepad** reconnects to that host by itself. The discoverable
 prompt only appears if no paired host reconnects within 5 seconds.
 
+On Android, the host loses the gamepad about 2 seconds after Gametap leaves the screen, for
+example after Home or locking the phone. Android unregisters any HID device app that is no
+longer visible. Coming back reconnects by itself, in about a second, unless you pressed **Stop**.
+Any control held when you leave is released first.
+
 Hold the three dots in the top-left corner of the gamepad to open settings.
 
 To check the result on a host, use Windows `joy.cpl`, <https://hardwaretester.com/gamepad>,
@@ -58,6 +62,10 @@ Steam controller settings, or `evtest` / `jstest` on Linux.
   emulators and most modern games accept it. XInput-only games need Steam Input or a mapper.
 - **Android phones without the HID Device profile.** Some makers disable it. The app then shows
   "Not supported on this device".
+- **No connection in the background on Android.** Games may pause or report a disconnected
+  controller while you are in another app. Staying connected would need a foreground service,
+  which shows a notification while it runs. It is not built, and HyperOS and similar systems may
+  stop it anyway.
 - **Descriptor changes.** Hosts cache the descriptor. Remove the device from the host's Bluetooth
   settings, forget the host on the phone, and pair again after any change.
 - **Placeholder identity.** The iOS PnP ID uses pid.codes test values, and the package name is
@@ -75,7 +83,8 @@ Measured on a Redmi Pad SE paired with a Linux PC, using injected touches:
 The link dominates. An idle link falls into Bluetooth sniff subrating, which raised send-to-PC
 time to a median of 66 ms and a maximum of 180 ms. Android has no public API to turn sniff off, so
 `ReportSender` repeats the last report every 16 ms while the gamepad screen is open. Do not remove
-this to save traffic. It costs some battery, so it stops when the screen closes.
+this to save traffic. It costs some battery, so it stops when the gamepad screen closes or the
+app leaves the foreground.
 
 Reports are capped at one per 8 ms. Stricter HID QoS settings did not improve latency.
 
