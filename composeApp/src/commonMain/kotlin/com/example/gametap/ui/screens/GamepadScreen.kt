@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -17,6 +16,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import com.example.gametap.platform.TransportState
 import com.example.gametap.ui.components.GamepadCanvas
 import com.example.gametap.ui.components.StatusPill
@@ -41,9 +41,11 @@ fun GamepadScreen(
     val openSettings by rememberUpdatedState(onOpenSettings)
     val scope = rememberCoroutineScope()
 
-    DisposableEffect(viewModel) {
+    // Runs on start and on stop, not only when the screen leaves composition, so Home or locking
+    // the phone also releases every control and stops the 16 ms keep-alive.
+    LifecycleStartEffect(viewModel) {
         viewModel.onScreenShown()
-        onDispose { viewModel.onScreenHidden() }
+        onStopOrDispose { viewModel.onScreenHidden() }
     }
 
     Box(
