@@ -40,7 +40,9 @@ class AndroidHidTransport(context: Context) : HidTransport {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             isReconnecting = registered && pluggedDevice != null
             if (!registered) {
-                host = null
+                // Android also unregisters on its own, about 2 s after the app leaves the
+                // foreground. Release the proxy too, or the next start() would return early.
+                hid?.let(::closeProxy)
                 mutableState.value = TransportState.Idle
                 return
             }
@@ -142,10 +144,14 @@ class AndroidHidTransport(context: Context) : HidTransport {
         return withTimeoutOrNull(PROXY_TIMEOUT_MS) { connected.await() }
     }
 
+    /** Safe to call from stop() and the unregister callback at once: only the first call closes. */
     private fun closeProxy(proxy: BluetoothHidDevice) {
+        synchronized(this) {
+            if (hid !== proxy) return
+            host = null
+            hid = null
+        }
         adapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, proxy)
-        host = null
-        hid = null
     }
 
     private companion object {
