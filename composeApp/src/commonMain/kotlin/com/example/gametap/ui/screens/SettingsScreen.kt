@@ -16,8 +16,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -50,14 +54,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         SliderRow(
             title = "Stick deadzone",
             value = settings.deadzone,
-            valueLabel = "${(settings.deadzone * 100).roundToInt()}%",
+            valueLabel = { "${(it * 100).roundToInt()}%" },
             range = 0f..0.4f,
             onChange = { value -> viewModel.update { it.copy(deadzone = value) } },
         )
         SliderRow(
             title = "Sensitivity curve",
             value = settings.curveExponent,
-            valueLabel = if (settings.curveExponent <= 1.01f) "Linear" else "Finer near center",
+            valueLabel = { if (it <= 1.01f) "Linear" else "Finer near center" },
             range = 1f..3f,
             onChange = { value -> viewModel.update { it.copy(curveExponent = value) } },
         )
@@ -70,20 +74,34 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     }
 }
 
+/**
+ * Shows the dragged position at once and saves only when the drag ends, so a drag is one write
+ * instead of one per frame. [onChange] receives the final value.
+ */
 @Composable
 private fun SliderRow(
     title: String,
     value: Float,
-    valueLabel: String,
+    valueLabel: (Float) -> String,
     range: ClosedFloatingPointRange<Float>,
     onChange: (Float) -> Unit,
 ) {
+    // Set while dragging and until the saved value comes back, so the thumb never jumps back.
+    var dragged by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(value) { dragged = null }
+    val shown = dragged ?: value
+
     Column(Modifier.fillMaxWidth()) {
         Row {
             Text(title, color = GamepadColors.Label, modifier = Modifier.weight(1f))
-            Text(valueLabel, color = GamepadColors.Accent)
+            Text(valueLabel(shown), color = GamepadColors.Accent)
         }
-        Slider(value = value, onValueChange = onChange, valueRange = range)
+        Slider(
+            value = shown,
+            onValueChange = { dragged = it },
+            onValueChangeFinished = { dragged?.let(onChange) },
+            valueRange = range,
+        )
     }
 }
 

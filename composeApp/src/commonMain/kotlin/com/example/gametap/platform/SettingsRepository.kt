@@ -16,25 +16,31 @@ const val SETTINGS_FILE_NAME = "gametap.preferences_pb"
 
 class SettingsRepository(private val store: DataStore<Preferences>, scope: CoroutineScope) {
     val settings: StateFlow<GamepadSettings> = store.data
-        .map { prefs ->
-            val defaults = GamepadSettings()
-            GamepadSettings(
-                deadzone = prefs[DEADZONE] ?: defaults.deadzone,
-                curveExponent = prefs[CURVE] ?: defaults.curveExponent,
-                hapticsEnabled = prefs[HAPTICS] ?: defaults.hapticsEnabled,
-                floatingSticks = prefs[FLOATING] ?: defaults.floatingSticks,
-            )
-        }
+        .map { it.toSettings() }
         .stateIn(scope, SharingStarted.Eagerly, GamepadSettings())
 
+    /**
+     * Applies [transform] to the stored values, not to [settings], which can lag behind a write
+     * that just finished. DataStore runs edits one at a time, so quick successive changes all stick.
+     */
     suspend fun update(transform: (GamepadSettings) -> GamepadSettings) {
-        val next = transform(settings.value)
         store.edit { prefs ->
+            val next = transform(prefs.toSettings())
             prefs[DEADZONE] = next.deadzone
             prefs[CURVE] = next.curveExponent
             prefs[HAPTICS] = next.hapticsEnabled
             prefs[FLOATING] = next.floatingSticks
         }
+    }
+
+    private fun Preferences.toSettings(): GamepadSettings {
+        val defaults = GamepadSettings()
+        return GamepadSettings(
+            deadzone = this[DEADZONE] ?: defaults.deadzone,
+            curveExponent = this[CURVE] ?: defaults.curveExponent,
+            hapticsEnabled = this[HAPTICS] ?: defaults.hapticsEnabled,
+            floatingSticks = this[FLOATING] ?: defaults.floatingSticks,
+        )
     }
 
     private companion object {
