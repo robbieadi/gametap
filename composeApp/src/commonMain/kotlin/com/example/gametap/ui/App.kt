@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -27,6 +28,12 @@ fun App() {
         val navController = rememberNavController()
         // Created outside the NavHost so the connection and sender outlive any one screen.
         val connection = koinViewModel<ConnectionViewModel>()
+
+        // Lets the connection restart after Android drops the gamepad in the background.
+        LifecycleStartEffect(connection) {
+            connection.onAppVisible(true)
+            onStopOrDispose { connection.onAppVisible(false) }
+        }
 
         // Lives here, not in ConnectScreen, so going back while connected does not bounce forward.
         val state by connection.state.collectAsState()

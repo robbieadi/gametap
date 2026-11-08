@@ -9,6 +9,7 @@ import com.example.gametap.platform.HidTransport
 import com.example.gametap.platform.TransportState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,20 +30,49 @@ class ConnectionViewModel(
     private val mutablePermissionDenied = MutableStateFlow(false)
     val permissionDenied: StateFlow<Boolean> = mutablePermissionDenied.asStateFlow()
 
+    // True from Start until Stop. Android drops the gamepad about 2 s after the app leaves the
+    // foreground, so this is what tells a drop to undo apart from the user stopping on purpose.
+    private var wantsRunning = false
+    private var isVisible = false
+    private var startJob: Job? = null
+
     init {
         viewModelScope.launch(Dispatchers.Default) { sender.run() }
+        viewModelScope.launch {
+            transport.state.collect { if (it == TransportState.Idle) restartIfDropped() }
+        }
     }
 
     fun start() {
-        viewModelScope.launch {
+        wantsRunning = true
+        launchStart(promptForNewHost = true)
+    }
+
+    /** Call when the app comes to the foreground (true) and leaves it (false). */
+    fun onAppVisible(visible: Boolean) {
+        isVisible = visible
+        if (visible) restartIfDropped()
+    }
+
+    /** Restarts silently: a paired host reconnects by itself, and nobody asked for the prompt. */
+    private fun restartIfDropped() {
+        val dropped = wantsRunning && isVisible && transport.state.value == TransportState.Idle
+        if (dropped && startJob?.isActive != true) launchStart(promptForNewHost = false)
+    }
+
+    private fun launchStart(promptForNewHost: Boolean) {
+        startJob = viewModelScope.launch {
             val ready = access.prepare()
             mutablePermissionDenied.value = !ready
-            if (!ready) return@launch
+            if (!ready) {
+                wantsRunning = false // Do not ask again every time the app comes back.
+                return@launch
+            }
             transport.start(HidDescriptor.bytes)
             val reached = withTimeoutOrNull(START_TIMEOUT_MS) {
                 transport.state.first { it != TransportState.Idle }
             }
-            if (reached != TransportState.Advertising) return@launch
+            if (reached != TransportState.Advertising || !promptForNewHost) return@launch
             if (transport.isReconnecting && awaitReconnect()) return@launch
             if (transport.state.value == TransportState.Advertising) access.requestDiscoverable()
         }
@@ -54,6 +84,8 @@ class ConnectionViewModel(
     } != null
 
     fun stop() {
+        wantsRunning = false
+        startJob?.cancel()
         viewModelScope.launch { transport.stop() }
     }
 
