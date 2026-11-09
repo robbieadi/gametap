@@ -48,13 +48,13 @@ data class GamepadLayout(
         val Default: GamepadLayout = GamepadLayout(
             controls = listOf(
                 GamepadControl.TriggerControl(Side.LEFT, "LT", Region(0.12f, 0.14f, 0.10f, 0.12f)),
-                GamepadControl.ButtonControl(Button.LB, "LB", Region(0.25f, 0.10f, 0.12f, 0.08f), round = false),
+                GamepadControl.ButtonControl(Button.LB, "LB", Region(0.26f, 0.10f, 0.12f, 0.08f), round = false),
                 GamepadControl.TriggerControl(Side.RIGHT, "RT", Region(0.88f, 0.14f, 0.10f, 0.12f)),
-                GamepadControl.ButtonControl(Button.RB, "RB", Region(0.75f, 0.10f, 0.12f, 0.08f), round = false),
+                GamepadControl.ButtonControl(Button.RB, "RB", Region(0.74f, 0.10f, 0.12f, 0.08f), round = false),
 
-                GamepadControl.StickControl(Side.LEFT, 0.17f, Region(0.17f, 0.52f, 0.25f, 0.23f)),
+                GamepadControl.StickControl(Side.LEFT, 0.17f, Region(0.14f, 0.52f, 0.21f, 0.23f)),
                 GamepadControl.ButtonControl(Button.L3, "L3", Region(0.06f, 0.88f, 0.08f)),
-                GamepadControl.DpadControl(Region(0.33f, 0.78f, 0.18f)),
+                GamepadControl.DpadControl(Region(0.40f, 0.78f, 0.18f)),
 
                 GamepadControl.StickControl(Side.RIGHT, 0.17f, Region(0.67f, 0.78f, 0.20f, 0.20f)),
                 GamepadControl.ButtonControl(Button.R3, "R3", Region(0.94f, 0.88f, 0.08f)),
@@ -68,7 +68,7 @@ data class GamepadLayout(
                 GamepadControl.ButtonControl(Button.HOME, "Home", Region(0.50f, 0.42f, 0.075f)),
                 GamepadControl.ButtonControl(Button.START, "Start", Region(0.58f, 0.26f, 0.09f, 0.055f), round = false),
             ),
-            settingsCorner = Region(0f, 0f, 0.10f, 0.16f),
+            settingsCorner = Region(0f, 0f, 0.09f, 0.16f),
         )
     }
 }
