@@ -136,3 +136,11 @@ Kotlin Multiplatform plugin.
 
 Versions are the newest stable set in the Kotlin Multiplatform compatibility table
 (Kotlin 2.4.21, AGP 9.3.1, Gradle 9.7.0). `compileSdk` is 37 because Compose requires it.
+
+## License
+
+Copyright (C) 2026 Robbie Ardiansyah
+
+Gametap is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. See [LICENSE](LICENSE).
