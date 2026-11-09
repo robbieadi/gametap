@@ -1,0 +1,43 @@
+package io.github.robbieadi.gametap.viewmodel
+
+import androidx.lifecycle.ViewModel
+import io.github.robbieadi.gametap.domain.GamepadLayout
+import io.github.robbieadi.gametap.domain.GamepadSettings
+import io.github.robbieadi.gametap.input.GamepadTouchTracker
+import io.github.robbieadi.gametap.input.InputStateHolder
+import io.github.robbieadi.gametap.input.ReportSender
+import io.github.robbieadi.gametap.platform.Haptics
+import io.github.robbieadi.gametap.platform.ScreenControl
+import io.github.robbieadi.gametap.platform.SettingsRepository
+import kotlinx.coroutines.flow.StateFlow
+
+class GamepadViewModel(
+    val input: InputStateHolder,
+    private val sender: ReportSender,
+    private val screenControl: ScreenControl,
+    private val haptics: Haptics,
+    settingsRepository: SettingsRepository,
+) : ViewModel() {
+    private val settings: StateFlow<GamepadSettings> = settingsRepository.settings
+
+    val layout: GamepadLayout = GamepadLayout.Default
+
+    val tracker = GamepadTouchTracker(
+        layout = layout,
+        input = input,
+        floatingSticks = { settings.value.floatingSticks },
+        onPress = { if (settings.value.hapticsEnabled) haptics.tick() },
+    )
+
+    fun onScreenShown() {
+        sender.lowLatency = true
+        screenControl.setGamepadMode(true)
+    }
+
+    /** Leaving the screen must never leave a button held on the host. */
+    fun onScreenHidden() {
+        tracker.releaseAll()
+        sender.lowLatency = false
+        screenControl.setGamepadMode(false)
+    }
+}

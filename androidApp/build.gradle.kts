@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.gametap"
+    namespace = "io.github.robbieadi.gametap"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.example.gametap"
+        applicationId = "io.github.robbieadi.gametap"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1

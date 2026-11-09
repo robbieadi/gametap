@@ -7,7 +7,7 @@ plugins {
 
 kotlin {
     android {
-        namespace = "com.example.gametap.shared"
+        namespace = "io.github.robbieadi.gametap.shared"
         compileSdk = libs.versions.android.compileSdk.get().toInt()
         minSdk = libs.versions.android.minSdk.get().toInt()
         withHostTest {}

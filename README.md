@@ -68,8 +68,7 @@ Steam controller settings, or `evtest` / `jstest` on Linux.
   stop it anyway.
 - **Descriptor changes.** Hosts cache the descriptor. Remove the device from the host's Bluetooth
   settings, forget the host on the phone, and pair again after any change.
-- **Placeholder identity.** The iOS PnP ID uses pid.codes test values, and the package name is
-  `com.example.gametap`. Replace both before release.
+- **Placeholder iOS PnP ID.** It uses pid.codes test values. Replace it before release.
 
 ## Latency
 

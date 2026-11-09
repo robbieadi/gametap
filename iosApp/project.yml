@@ -1,7 +1,7 @@
 # Generate iosApp.xcodeproj on a Mac with: brew install xcodegen && xcodegen generate
 name: iosApp
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: io.github.robbieadi
   deploymentTarget:
     iOS: "16.0"
 targets:
@@ -14,7 +14,7 @@ targets:
       path: iosApp/Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.gametap
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.robbieadi.gametap
         PRODUCT_NAME: Gametap
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
