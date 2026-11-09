@@ -1,6 +1,7 @@
 package io.github.robbieadi.gametap
 
 import io.github.robbieadi.gametap.hid.HidDescriptor
+import io.github.robbieadi.gametap.hid.HidReportEncoder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -68,6 +69,6 @@ class HidDescriptorTest {
             }
             i += 1 + length
         }
-        assertEquals(9 * 8, bits)
+        assertEquals(HidReportEncoder.REPORT_SIZE * 8, bits)
     }
 }

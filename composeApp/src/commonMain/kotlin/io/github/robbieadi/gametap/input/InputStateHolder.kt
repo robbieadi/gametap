@@ -13,6 +13,4 @@ class InputStateHolder {
     fun set(state: GamepadState) {
         mutableState.value = state
     }
-
-    fun reset() = set(GamepadState())
 }
