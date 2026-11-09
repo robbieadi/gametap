@@ -1,6 +1,9 @@
 package io.github.robbieadi.gametap.platform
 
 interface Haptics {
+    /** False when the device has no vibration hardware, such as most tablets. */
+    val isAvailable: Boolean
+
     fun tick()
 }
 

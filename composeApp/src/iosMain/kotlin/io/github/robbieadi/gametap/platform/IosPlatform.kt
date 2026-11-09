@@ -1,11 +1,15 @@
 package io.github.robbieadi.gametap.platform
 
+import platform.CoreHaptics.CHHapticEngine
 import platform.UIKit.UIApplication
 import platform.UIKit.UIImpactFeedbackGenerator
 import platform.UIKit.UIImpactFeedbackStyle
 
 class IosHaptics : Haptics {
     private val generator = UIImpactFeedbackGenerator(UIImpactFeedbackStyle.UIImpactFeedbackStyleLight)
+
+    /** iPads and older iPhones have no Taptic Engine. */
+    override val isAvailable: Boolean = CHHapticEngine.capabilitiesForHardware().supportsHaptics
 
     override fun tick() = generator.impactOccurred()
 }

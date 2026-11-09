@@ -14,8 +14,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 class AndroidHaptics(context: Context) : Haptics {
     private val vibrator: Vibrator? = context.getSystemService(Vibrator::class.java)
 
+    override val isAvailable: Boolean = vibrator?.hasVibrator() == true
+
     override fun tick() {
-        vibrator?.vibrate(VibrationEffect.createOneShot(TICK_MS, VibrationEffect.DEFAULT_AMPLITUDE))
+        if (isAvailable) vibrator?.vibrate(VibrationEffect.createOneShot(TICK_MS, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     private companion object {

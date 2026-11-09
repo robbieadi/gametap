@@ -65,8 +65,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             range = 1f..3f,
             onChange = { value -> viewModel.update { it.copy(curveExponent = value) } },
         )
-        SwitchRow("Haptics", settings.hapticsEnabled) { value ->
-            viewModel.update { it.copy(hapticsEnabled = value) }
+        if (viewModel.hapticsAvailable) {
+            SwitchRow("Haptics", settings.hapticsEnabled) { value ->
+                viewModel.update { it.copy(hapticsEnabled = value) }
+            }
         }
         SwitchRow("Floating sticks", settings.floatingSticks) { value ->
             viewModel.update { it.copy(floatingSticks = value) }
