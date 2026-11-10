@@ -31,6 +31,7 @@ kotlin {
             implementation(libs.lifecycle.runtime.compose)
             implementation(libs.navigation.compose)
             implementation(libs.datastore.preferences)
+            implementation(libs.datastore.core.okio)
             implementation(libs.serialization.json)
             implementation(libs.coroutines.core)
             implementation(libs.koin.core)
