@@ -1,5 +1,8 @@
 package io.github.robbieadi.gametap.domain
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
 /**
  * Gamepad buttons and their HID report bits.
  *
@@ -7,11 +10,19 @@ package io.github.robbieadi.gametap.domain
  * A, B, C, X, Y, Z, L1, R1, L2, R2, Select, Start, Mode, L3, R3. Bits 2, 5, 8, 9 and 15 stay
  * unused because this pad has no C or Z button and its triggers are analog axes.
  */
+@Serializable
 enum class Button(val bit: Int) {
-    A(0), B(1), X(3), Y(4),
-    LB(6), RB(7),
-    SELECT(10), START(11), HOME(12),
-    L3(13), R3(14);
+    @SerialName("a") A(0),
+    @SerialName("b") B(1),
+    @SerialName("x") X(3),
+    @SerialName("y") Y(4),
+    @SerialName("lb") LB(6),
+    @SerialName("rb") RB(7),
+    @SerialName("select") SELECT(10),
+    @SerialName("start") START(11),
+    @SerialName("home") HOME(12),
+    @SerialName("l3") L3(13),
+    @SerialName("r3") R3(14);
 
     val mask: Int get() = 1 shl bit
 }
