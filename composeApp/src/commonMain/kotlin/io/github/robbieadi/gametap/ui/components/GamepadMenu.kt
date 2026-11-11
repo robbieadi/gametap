@@ -51,6 +51,7 @@ fun GamepadMenu(
     onDuplicateProfile: (String) -> Unit,
     onRenameProfile: (String) -> Unit,
     onDeleteProfile: (String) -> Unit,
+    onEditLayout: () -> Unit,
     onResume: () -> Unit,
     onOpenSettings: () -> Unit,
     onLeave: () -> Unit,
@@ -97,6 +98,7 @@ fun GamepadMenu(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(onClick = onResume, modifier = Modifier.fillMaxWidth()) { Text("Resume") }
+                OutlinedButton(onClick = onEditLayout, modifier = Modifier.fillMaxWidth()) { Text("Edit layout") }
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) { Text("Settings") }
                 OutlinedButton(onClick = onLeave, modifier = Modifier.fillMaxWidth()) { Text(leaveLabel(transport)) }
             }

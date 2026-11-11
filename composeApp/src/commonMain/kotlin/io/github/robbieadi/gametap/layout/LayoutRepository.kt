@@ -67,6 +67,14 @@ class LayoutRepository(
         return copy
     }
 
+    /**
+     * A copy of the profile with [sourceId] under a free name, not stored. The editor starts from
+     * it when asked to edit the read-only default, and stores it only on save.
+     */
+    fun draftCopy(sourceId: String): LayoutProfile? = layouts.value.let { layouts ->
+        layouts.find(sourceId)?.let { layouts.copyOf(it) }
+    }
+
     /** Renames a stored profile. Blank or taken names are the caller's to reject. */
     suspend fun rename(id: String, name: String) {
         require(id != DefaultLayout.PROFILE_ID) { "The default layout is read-only" }

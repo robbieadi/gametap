@@ -21,7 +21,7 @@ import io.github.robbieadi.gametap.ui.theme.GamepadColors
 
 /** Says the layout does not fit the current screen. The affected controls are outlined on the canvas. */
 @Composable
-fun FitBanner(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun FitBanner(onEdit: () -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .consumeAllTouches()
@@ -38,6 +38,14 @@ fun FitBanner(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false).padding(vertical = 5.dp),
+        )
+        Text(
+            text = "Edit",
+            style = MaterialTheme.typography.labelLarge,
+            color = GamepadColors.Accent,
+            modifier = Modifier
+                .clickable(role = Role.Button, onClick = onEdit)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
         )
         Text(
             text = "✕",

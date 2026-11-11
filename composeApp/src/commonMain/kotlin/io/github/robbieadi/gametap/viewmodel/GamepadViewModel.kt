@@ -10,7 +10,7 @@ import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.LayoutRepository
 import io.github.robbieadi.gametap.layout.Layouts
 import io.github.robbieadi.gametap.platform.Haptics
-import io.github.robbieadi.gametap.platform.ScreenControl
+import io.github.robbieadi.gametap.platform.ScreenModeLock
 import io.github.robbieadi.gametap.platform.SettingsRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class GamepadViewModel(
     val input: InputStateHolder,
     private val sender: ReportSender,
-    private val screenControl: ScreenControl,
+    private val screenMode: ScreenModeLock,
     private val haptics: Haptics,
     settingsRepository: SettingsRepository,
     private val layoutRepository: LayoutRepository,
@@ -72,13 +72,13 @@ class GamepadViewModel(
 
     fun onScreenShown() {
         sender.lowLatency = true
-        screenControl.setGamepadMode(true)
+        screenMode.acquire()
     }
 
     /** Leaving the screen must never leave a button held on the host. */
     fun onScreenHidden() {
         tracker.releaseAll()
         sender.lowLatency = false
-        screenControl.setGamepadMode(false)
+        screenMode.release()
     }
 }

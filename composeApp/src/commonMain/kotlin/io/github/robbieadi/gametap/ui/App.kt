@@ -8,19 +8,27 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import io.github.robbieadi.gametap.platform.TransportState
 import io.github.robbieadi.gametap.ui.screens.ConnectScreen
+import io.github.robbieadi.gametap.ui.screens.EditorScreen
 import io.github.robbieadi.gametap.ui.screens.GamepadScreen
 import io.github.robbieadi.gametap.ui.screens.SettingsScreen
 import io.github.robbieadi.gametap.ui.theme.GametapTheme
 import io.github.robbieadi.gametap.viewmodel.ConnectionViewModel
+import kotlinx.serialization.Serializable
 import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 private object Routes {
     const val CONNECT = "connect"
     const val GAMEPAD = "gamepad"
     const val SETTINGS = "settings"
 }
+
+/** The layout editor, opened on one profile. */
+@Serializable
+data class EditorRoute(val profileId: String)
 
 @Composable
 fun App() {
@@ -57,10 +65,18 @@ fun App() {
                     viewModel = koinViewModel(),
                     transportState = connection.state,
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onEditLayout = { id -> navController.navigate(EditorRoute(id)) },
                     onLeave = { disconnect ->
                         if (disconnect) connection.stop()
                         navController.popBackStack(Routes.CONNECT, inclusive = false)
                     },
+                )
+            }
+            composable<EditorRoute> { entry ->
+                val route = entry.toRoute<EditorRoute>()
+                EditorScreen(
+                    viewModel = koinViewModel { parametersOf(route.profileId) },
+                    onClose = { navController.popBackStack() },
                 )
             }
             composable(Routes.SETTINGS) {

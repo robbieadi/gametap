@@ -140,6 +140,14 @@ class LayoutRepositoryTest {
     }
 
     @Test
+    fun draftCopyIsNotStored() = runTest {
+        val store = store()
+        val copy = assertNotNull(repository(store).draftCopy(DefaultLayout.PROFILE_ID))
+        assertEquals("Default copy", copy.name)
+        assertEquals(emptyList(), store.value.profiles)
+    }
+
+    @Test
     fun renameChangesOnlyTheName() = runTest {
         val store = store(racing)
         val repository = repository(store)

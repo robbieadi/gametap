@@ -53,6 +53,8 @@ fun GamepadScreen(
     viewModel: GamepadViewModel,
     transportState: StateFlow<TransportState>,
     onOpenSettings: () -> Unit,
+    /** Opens the editor on the profile with this id. */
+    onEditLayout: (String) -> Unit,
     /** Back to the start screen. [disconnect] also stops the gamepad. */
     onLeave: (disconnect: Boolean) -> Unit,
 ) {
@@ -146,7 +148,7 @@ fun GamepadScreen(
         ) {
             StatusPill(transport)
             if (showBanner) {
-                FitBanner(onDismiss = { dismissedFor = layout to size })
+                FitBanner(onEdit = { onEditLayout(layout.id) }, onDismiss = { dismissedFor = layout to size })
             }
         }
         if (menuOpen) {
@@ -160,6 +162,10 @@ fun GamepadScreen(
                 onDuplicateProfile = viewModel::duplicateProfile,
                 onRenameProfile = { renaming = it },
                 onDeleteProfile = { deleting = it },
+                onEditLayout = {
+                    menuOpen = false
+                    onEditLayout(layout.id)
+                },
                 onResume = { menuOpen = false },
                 onOpenSettings = {
                     menuOpen = false
