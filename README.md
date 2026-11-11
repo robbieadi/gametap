@@ -72,12 +72,19 @@ Steam controller settings, or `evtest` / `jstest` on Linux.
 
 ## Latency
 
-Measured on a Redmi Pad SE paired with a Linux PC, using injected touches:
+Measured on a Redmi Pad SE paired with a Linux PC, from 159 injected button presses and releases
+(`cmd input motionevent`) with pauses of 0.3 to 0.7 s between them:
 
-| Stage | Median | p90 |
-|-------|--------|-----|
-| Touch event to report sent | 10 ms | 15 ms |
-| Report sent to PC, including after a pause | 17 ms | 22 ms |
+| Stage | Median | p90 | Max |
+|-------|--------|-----|-----|
+| Input dispatcher to report sent | 6 ms | 11 ms | 13 ms |
+| Report sent to PC | 11 ms | 17 ms | 24 ms |
+| End to end | 18 ms | 24 ms | 30 ms |
+
+On the tablet, `atrace` timed each touch from Android's input dispatcher to the app's
+`sendReport` binder call. On the PC, the times come from evdev. The two clocks were synced over
+adb to within about 1.5 ms. The touchscreen's own scan delay is not included, so a real finger
+adds a few milliseconds.
 
 The link dominates. An idle link falls into Bluetooth sniff subrating, which raised send-to-PC
 time to a median of 66 ms and a maximum of 180 ms. Android has no public API to turn sniff off, so
@@ -85,7 +92,9 @@ time to a median of 66 ms and a maximum of 180 ms. Android has no public API to 
 this to save traffic. It costs some battery, so it stops when the gamepad screen closes or the
 app leaves the foreground.
 
-Reports are capped at one per 8 ms. Stricter HID QoS settings did not improve latency.
+Reports are capped at one per 8 ms. Both intervals count from when a send starts, because
+`sendReport` blocks for about 1.5 ms and occasionally 10 ms. Timers fire slightly late, so the
+keep-alive measures about 17 ms. Stricter HID QoS settings did not improve latency.
 
 ## Axis mapping
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -22,18 +23,48 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+
+/**
+ * Virtual test time plus the time spent inside [FakeTransport.sendReport]. A real send blocks the
+ * sender's thread, which virtual time cannot express, so the blocked time is added here instead.
+ */
+private class FakeClock(private val scheduler: TestCoroutineScheduler) : TimeSource {
+    var blockedMs = 0L
+
+    fun nowMs(): Long = scheduler.currentTime + blockedMs
+
+    override fun markNow(): TimeMark {
+        val at = nowMs()
+        return object : TimeMark {
+            override fun elapsedNow(): Duration = (nowMs() - at).milliseconds
+        }
+    }
+}
 
 private class FakeTransport(initial: TransportState = TransportState.Connected("host")) : HidTransport {
     override val state = MutableStateFlow(initial)
     val sent = MutableSharedFlow<List<Int>>(extraBufferCapacity = 256)
     var accept = true
     var attempts = 0
+    var clock: FakeClock? = null
+    /** How long each send blocks, in clock time. */
+    var callMs = 0L
+    /** Clock time at the start of each send. */
+    val startedAt = mutableListOf<Long>()
 
     override suspend fun start(descriptor: ByteArray) = Unit
     override suspend fun stop() = Unit
 
     override fun sendReport(reportId: Int, data: ByteArray): Boolean {
         attempts++
+        clock?.let {
+            startedAt += it.nowMs()
+            it.blockedMs += callMs
+        }
         if (accept) sent.tryEmit(data.map { it.toInt() and 0xFF })
         return accept
     }
@@ -44,7 +75,9 @@ class ReportSenderTest {
     private val settings = MutableStateFlow(GamepadSettings(deadzone = 0f))
 
     private fun TestScope.startSender(transport: FakeTransport, lowLatency: Boolean = false): ReportSender {
-        val sender = ReportSender(input, transport, settings)
+        val clock = FakeClock(testScheduler)
+        transport.clock = clock
+        val sender = ReportSender(input, transport, settings, timeSource = clock)
         sender.lowLatency = lowLatency
         backgroundScope.launch { sender.run() }
         runCurrent()
@@ -113,6 +146,32 @@ class ReportSenderTest {
         startSender(transport, lowLatency = true)
         advance(160)
         assertEquals(11, transport.attempts)
+    }
+
+    @Test
+    fun keepAliveCountsFromTheStartOfEachSend() = runTest {
+        val transport = FakeTransport().apply { callMs = 2 }
+        startSender(transport, lowLatency = true)
+        advance(150)
+        val gaps = transport.startedAt.zipWithNext { a, b -> b - a }
+        assertTrue(gaps.size >= 9, "gaps=$gaps")
+        assertEquals(setOf(16L), gaps.toSet())
+    }
+
+    @Test
+    fun slowSendDoesNotDelayTheNextChange() = runTest {
+        val transport = FakeTransport().apply { callMs = 5 }
+        startSender(transport)
+        input.set(GamepadState(buttons = Button.A.mask))
+        runCurrent()
+        assertEquals(1, transport.attempts, "still inside the minimum interval")
+
+        // The first send took 5 ms of the 8 ms minimum interval, so 3 ms remain.
+        advance(2)
+        assertEquals(1, transport.attempts)
+        advance(1)
+        assertEquals(2, transport.attempts)
+        assertEquals(listOf(0L, 8L), transport.startedAt)
     }
 
     @Test
