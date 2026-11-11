@@ -30,6 +30,7 @@ kotlin {
             implementation(libs.lifecycle.viewmodel.compose)
             implementation(libs.lifecycle.runtime.compose)
             implementation(libs.navigation.compose)
+            implementation(libs.navigationevent.compose)
             implementation(libs.datastore.preferences)
             implementation(libs.datastore.core.okio)
             implementation(libs.serialization.json)

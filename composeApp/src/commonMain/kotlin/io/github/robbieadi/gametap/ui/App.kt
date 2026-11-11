@@ -57,6 +57,10 @@ fun App() {
                     viewModel = koinViewModel(),
                     transportState = connection.state,
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onLeave = { disconnect ->
+                        if (disconnect) connection.stop()
+                        navController.popBackStack(Routes.CONNECT, inclusive = false)
+                    },
                 )
             }
             composable(Routes.SETTINGS) {

@@ -138,4 +138,13 @@ class LayoutRepositoryTest {
         val loaded = repository(store(twoMenus)).layouts.value.find(racing.id)
         assertEquals(listOf(menu, jump), assertNotNull(loaded).controls)
     }
+
+    @Test
+    fun renameChangesOnlyTheName() = runTest {
+        val store = store(racing)
+        val repository = repository(store)
+        repository.rename(racing.id, "Drift")
+        assertEquals(listOf(racing.copy(name = "Drift")), store.value.profiles)
+        assertFailsWith<IllegalArgumentException> { repository.rename(DefaultLayout.PROFILE_ID, "Mine") }
+    }
 }

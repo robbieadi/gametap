@@ -67,6 +67,14 @@ class LayoutRepository(
         return copy
     }
 
+    /** Renames a stored profile. Blank or taken names are the caller's to reject. */
+    suspend fun rename(id: String, name: String) {
+        require(id != DefaultLayout.PROFILE_ID) { "The default layout is read-only" }
+        store.updateData { stored ->
+            stored.copy(profiles = stored.profiles.map { if (it.id == id) it.copy(name = name) else it })
+        }
+    }
+
     private fun Layouts.copyOf(source: LayoutProfile): LayoutProfile {
         val names = profiles.map { it.name }.toSet()
         val base = "${source.name} copy"

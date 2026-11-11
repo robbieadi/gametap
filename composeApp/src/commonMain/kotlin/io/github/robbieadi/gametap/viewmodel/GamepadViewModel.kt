@@ -8,6 +8,7 @@ import io.github.robbieadi.gametap.input.InputStateHolder
 import io.github.robbieadi.gametap.input.ReportSender
 import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.LayoutRepository
+import io.github.robbieadi.gametap.layout.Layouts
 import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.ScreenControl
 import io.github.robbieadi.gametap.platform.SettingsRepository
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class GamepadViewModel(
     val input: InputStateHolder,
@@ -23,7 +25,7 @@ class GamepadViewModel(
     private val screenControl: ScreenControl,
     private val haptics: Haptics,
     settingsRepository: SettingsRepository,
-    layoutRepository: LayoutRepository,
+    private val layoutRepository: LayoutRepository,
 ) : ViewModel() {
     private val settings: StateFlow<GamepadSettings> = settingsRepository.settings
 
@@ -39,6 +41,34 @@ class GamepadViewModel(
         .map { it.active }
         .onEach { tracker.setLayout(it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, layoutRepository.layouts.value.active)
+
+    /** Every profile, for the in-game menu. */
+    val layouts: StateFlow<Layouts> = layoutRepository.layouts
+
+    fun selectProfile(id: String) {
+        viewModelScope.launch { layoutRepository.select(id) }
+    }
+
+    fun duplicateProfile(id: String) {
+        viewModelScope.launch { layoutRepository.duplicate(id) }
+    }
+
+    fun renameProfile(id: String, name: String) {
+        viewModelScope.launch { layoutRepository.rename(id, name.trim()) }
+    }
+
+    fun deleteProfile(id: String) {
+        viewModelScope.launch { layoutRepository.delete(id) }
+    }
+
+    /** True if a profile other than [id] already uses [name]. */
+    fun isNameTaken(id: String, name: String): Boolean =
+        layouts.value.profiles.any { it.id != id && it.name == name.trim() }
+
+    /** Opening the menu lets go of every control, so nothing stays held behind it. */
+    fun onMenuOpened() {
+        tracker.releaseAll()
+    }
 
     fun onScreenShown() {
         sender.lowLatency = true
