@@ -156,11 +156,8 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
             null,
             CBAttributePermissionsReadEncryptionRequired,
         )
-        report.setDescriptors(
-            listOf(
-                CBMutableDescriptor(uUID(REPORT_REFERENCE), bytes(HidDescriptor.REPORT_ID, REPORT_TYPE_INPUT).toNSData()),
-            ),
-        )
+        // Report Reference descriptor omitted: CBMutableDescriptor does not accept 0x2908 at runtime.
+        // We only have one input report ID, so hosts can infer it from the characteristic itself.
         reportCharacteristic = report
 
         val controlPoint = CBMutableCharacteristic(
@@ -318,8 +315,6 @@ private const val PROTOCOL_MODE = "2A4E"
 private const val PNP_ID = "2A50"
 private const val MANUFACTURER_NAME = "2A29"
 private const val BATTERY_LEVEL = "2A19"
-private const val REPORT_REFERENCE = "2908"
-private const val REPORT_TYPE_INPUT = 0x01
 private const val PROTOCOL_MODE_REPORT = 0x01
 
 private fun uUID(short: String): CBUUID = CBUUID.UUIDWithString("0000$short-0000-1000-8000-00805F9B34FB")
