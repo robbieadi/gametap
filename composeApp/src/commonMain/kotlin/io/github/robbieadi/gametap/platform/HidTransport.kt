@@ -14,8 +14,8 @@ sealed interface TransportState {
 interface HidTransport {
     val state: StateFlow<TransportState>
 
-    /** True while advertising if a previously paired host is being reconnected. */
-    val isReconnecting: Boolean get() = false
+    /** True when the gamepad should stop shortly after the app leaves the foreground. */
+    val stopsInBackground: Boolean get() = false
 
     /** Registers the descriptor and starts advertising. */
     suspend fun start(descriptor: ByteArray)

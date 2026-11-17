@@ -14,11 +14,6 @@ interface ScreenControl {
 
 /** Permission and adapter steps that need the UI before the transport can start. */
 interface BluetoothAccess {
-    /** True when the host has to be told to make this phone discoverable. */
-    val needsDiscoverability: Boolean
-
     /** Requests whatever is missing. Returns true when Bluetooth is usable. */
     suspend fun prepare(): Boolean
-
-    fun requestDiscoverable()
 }

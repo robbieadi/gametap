@@ -3,8 +3,12 @@
 package io.github.robbieadi.gametap.platform
 
 import io.github.robbieadi.gametap.domain.GamepadState
-import io.github.robbieadi.gametap.hid.HidDescriptor
 import io.github.robbieadi.gametap.hid.HidReportEncoder
+import io.github.robbieadi.gametap.hogp.HogpAccess
+import io.github.robbieadi.gametap.hogp.HogpCharacteristic
+import io.github.robbieadi.gametap.hogp.HogpProfile
+import io.github.robbieadi.gametap.hogp.HogpRead
+import io.github.robbieadi.gametap.hogp.LatestReportQueue
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCSignatureOverride
@@ -15,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import platform.CoreBluetooth.CBATTErrorInvalidOffset
+import platform.CoreBluetooth.CBATTErrorReadNotPermitted
 import platform.CoreBluetooth.CBATTErrorSuccess
 import platform.CoreBluetooth.CBATTRequest
 import platform.CoreBluetooth.CBAdvertisementDataLocalNameKey
@@ -25,6 +30,7 @@ import platform.CoreBluetooth.CBAttributePermissionsWriteEncryptionRequired
 import platform.CoreBluetooth.CBAttributePermissionsWriteable
 import platform.CoreBluetooth.CBCentral
 import platform.CoreBluetooth.CBCharacteristic
+import platform.CoreBluetooth.CBCharacteristicPropertyNotify
 import platform.CoreBluetooth.CBCharacteristicPropertyNotifyEncryptionRequired
 import platform.CoreBluetooth.CBCharacteristicPropertyRead
 import platform.CoreBluetooth.CBCharacteristicPropertyWriteWithoutResponse
@@ -41,18 +47,15 @@ import platform.CoreBluetooth.CBService
 import platform.CoreBluetooth.CBUUID
 import platform.Foundation.NSData
 import platform.Foundation.NSError
-import platform.Foundation.NSMakeRange
 import platform.Foundation.dataWithBytes
-import platform.Foundation.subdataWithRange
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
 /**
- * HID over GATT from a CoreBluetooth peripheral. All CoreBluetooth calls run on the main queue.
+ * Publishes [HogpProfile] from a CoreBluetooth peripheral. All CoreBluetooth calls run on the main
+ * queue.
  *
- * Platform constraints this follows (not yet confirmed on hardware, see the README):
- * - SIG UUIDs use the full 128-bit form; iOS is reported to reject the 16-bit form as reserved.
  * - Hosts can stall after subscribing until an input report arrives, so one is sent at once.
  * - Advertising only carries a name and service UUIDs, so the gamepad appearance cannot be sent.
  * - iOS gives no host name, so the connected state shows a short central identifier.
@@ -77,18 +80,26 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
 
     private var manager: CBPeripheralManager? = null
     private var reportCharacteristic: CBMutableCharacteristic? = null
-    private var reportMap: NSData? = null
-    private val staticValues = HashMap<String, NSData>()
+    private var reportMap: ByteArray = ByteArray(0)
+    private val staticValues = HashMap<String, ByteArray>()
     private val pendingServices = HashSet<String>()
 
     private var latestReport: ByteArray = HidReportEncoder.encode(GamepadState())
-    private var reportPending = false
+
+    // updateValue refuses a report when iOS's queue is full and calls
+    // peripheralManagerIsReadyToUpdateSubscribers once there is room; accepted reports need no
+    // confirmation.
+    private val reports = LatestReportQueue(waitsForCompletion = false) { report ->
+        val peripheral = manager
+        val characteristic = reportCharacteristic
+        peripheral != null && characteristic != null && peripheral.updateValue(report.toNSData(), characteristic, null)
+    }
 
     fun start(descriptor: ByteArray) {
         onMain {
             if (manager != null && mutableState.value !is TransportState.Error) return@onMain
             tearDown()
-            reportMap = descriptor.toNSData()
+            reportMap = descriptor
             // The delegate's state callback builds the GATT tree once Bluetooth is on.
             manager = CBPeripheralManager(delegate = this, queue = null)
         }
@@ -107,117 +118,65 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         manager?.delegate = null
         manager = null
         reportCharacteristic = null
-        reportPending = false
+        reports.reset()
         pendingServices.clear()
     }
 
-    /** Queues the report. Only the newest report is kept while the radio is backed up. */
     fun send(data: ByteArray): Boolean {
         onMain {
             latestReport = data
-            flushReport()
+            reports.offer(data)
         }
         return true
     }
 
-    private fun flushReport() {
-        val peripheral = manager ?: return
-        val characteristic = reportCharacteristic ?: return
-        val sent = peripheral.updateValue(latestReport.toNSData(), characteristic, null)
-        reportPending = !sent
-    }
-
     private fun publishServices(peripheral: CBPeripheralManager) {
         if (reportCharacteristic != null) return
-        val hidService = buildHidService()
-        val services = listOf(hidService, buildDeviceInfoService(), buildBatteryService())
+        staticValues.clear()
+        val services = HogpProfile.services(reportMap).map { service ->
+            CBMutableService(cbUuid(service.uuid), true).apply {
+                setCharacteristics(service.characteristics.map(::toCoreBluetooth))
+            }
+        }
         pendingServices.clear()
         services.forEach { pendingServices.add(it.UUID.UUIDString) }
         services.forEach(peripheral::addService)
     }
 
-    private fun buildHidService(): CBMutableService {
-        val hidInformation = staticCharacteristic(
-            HID_INFORMATION,
-            bytes(0x11, 0x01, 0x00, 0x02), // bcdHID 0x0111, country 0, flags 0x02
-            CBAttributePermissionsReadable,
-        )
-        val map = CBMutableCharacteristic(
-            uUID(REPORT_MAP),
-            CBCharacteristicPropertyRead,
-            null,
-            CBAttributePermissionsReadEncryptionRequired,
-        )
-        reportMap?.let { staticValues[map.UUID.UUIDString] = it }
-
-        val report = CBMutableCharacteristic(
-            uUID(REPORT),
-            CBCharacteristicPropertyRead or CBCharacteristicPropertyNotifyEncryptionRequired,
-            null,
-            CBAttributePermissionsReadEncryptionRequired,
-        )
-        report.setDescriptors(
-            listOf(
-                CBMutableDescriptor(uUID(REPORT_REFERENCE), bytes(HidDescriptor.REPORT_ID, REPORT_TYPE_INPUT).toNSData()),
-            ),
-        )
-        reportCharacteristic = report
-
-        val controlPoint = CBMutableCharacteristic(
-            uUID(HID_CONTROL_POINT),
-            CBCharacteristicPropertyWriteWithoutResponse,
-            null,
-            CBAttributePermissionsWriteable or CBAttributePermissionsWriteEncryptionRequired,
-        )
-        val protocolMode = CBMutableCharacteristic(
-            uUID(PROTOCOL_MODE),
-            CBCharacteristicPropertyRead or CBCharacteristicPropertyWriteWithoutResponse,
-            null,
-            CBAttributePermissionsReadEncryptionRequired or CBAttributePermissionsWriteEncryptionRequired,
-        )
-        staticValues[protocolMode.UUID.UUIDString] = bytes(PROTOCOL_MODE_REPORT).toNSData()
-
-        return CBMutableService(uUID(HID_SERVICE), true).apply {
-            setCharacteristics(listOf(hidInformation, map, report, controlPoint, protocolMode))
-        }
-    }
-
-    private fun buildDeviceInfoService(): CBMutableService {
-        val pnpId = staticCharacteristic(
-            PNP_ID,
-            // USB vendor source, pid.codes test IDs, version 1.0. Replace before release.
-            bytes(0x02, 0x09, 0x12, 0x01, 0x00, 0x00, 0x01),
-            CBAttributePermissionsReadable,
-        )
-        val manufacturer = staticCharacteristic(
-            MANUFACTURER_NAME,
-            "Gametap".encodeToByteArray(),
-            CBAttributePermissionsReadable,
-        )
-        return CBMutableService(uUID(DEVICE_INFO_SERVICE), true).apply {
-            setCharacteristics(listOf(pnpId, manufacturer))
-        }
-    }
-
-    private fun buildBatteryService(): CBMutableService {
-        val level = staticCharacteristic(BATTERY_LEVEL, bytes(100), CBAttributePermissionsReadable)
-        return CBMutableService(uUID(BATTERY_SERVICE), true).apply {
-            setCharacteristics(listOf(level))
-        }
-    }
-
     /** Values are served from read requests, since iOS restricts characteristics with cached values. */
-    private fun staticCharacteristic(uuid: String, value: ByteArray, permissions: ULong): CBMutableCharacteristic {
-        val characteristic = CBMutableCharacteristic(uUID(uuid), CBCharacteristicPropertyRead, null, permissions)
-        staticValues[characteristic.UUID.UUIDString] = value.toNSData()
+    private fun toCoreBluetooth(spec: HogpCharacteristic): CBMutableCharacteristic {
+        val encrypted = spec.access == HogpAccess.Encrypted
+        var properties = 0uL
+        var permissions = 0uL
+        if (spec.readable) {
+            properties = properties or CBCharacteristicPropertyRead
+            permissions = permissions or
+                if (encrypted) CBAttributePermissionsReadEncryptionRequired else CBAttributePermissionsReadable
+        }
+        if (spec.writableWithoutResponse) {
+            properties = properties or CBCharacteristicPropertyWriteWithoutResponse
+            permissions = permissions or
+                if (encrypted) CBAttributePermissionsWriteEncryptionRequired else CBAttributePermissionsWriteable
+        }
+        if (spec.notifies) {
+            // iOS adds the Client Characteristic Configuration descriptor itself.
+            properties = properties or
+                if (encrypted) CBCharacteristicPropertyNotifyEncryptionRequired else CBCharacteristicPropertyNotify
+        }
+        val characteristic = CBMutableCharacteristic(cbUuid(spec.uuid), properties, null, permissions)
+        spec.reportReference?.let {
+            characteristic.setDescriptors(listOf(CBMutableDescriptor(cbUuid(HogpProfile.REPORT_REFERENCE), it.toNSData())))
+        }
+        spec.value?.let { staticValues[characteristic.UUID.UUIDString] = it }
+        if (spec.uuid == HogpProfile.REPORT) reportCharacteristic = characteristic
         return characteristic
     }
 
     private fun startAdvertising(peripheral: CBPeripheralManager) {
         peripheral.startAdvertising(
             mapOf<Any?, Any?>(
-                CBAdvertisementDataLocalNameKey to "Gametap",
-                CBAdvertisementDataServiceUUIDsKey to listOf(uUID(HID_SERVICE)),
+                CBAdvertisementDataLocalNameKey to HogpProfile.NAME,
+                CBAdvertisementDataServiceUUIDsKey to listOf(cbUuid(HogpProfile.HID_SERVICE)),
             ),
         )
     }
@@ -229,6 +188,7 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
                 // Published services do not survive a power cycle, so rebuild them when it returns.
                 peripheral.removeAllServices()
                 reportCharacteristic = null
+                reports.reset()
                 mutableState.value = TransportState.Error("Bluetooth is off")
             }
             CBManagerStateUnauthorized -> mutableState.value = TransportState.Error("Bluetooth access is not allowed")
@@ -240,7 +200,7 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     override fun peripheralManager(peripheral: CBPeripheralManager, didAddService: CBService, error: NSError?) {
         val uuid = didAddService.UUID.UUIDString
         pendingServices.remove(uuid)
-        if (error != null && uuid == uUID(HID_SERVICE).UUIDString) {
+        if (error != null && uuid == cbUuid(HogpProfile.HID_SERVICE).UUIDString) {
             pendingServices.clear()
             mutableState.value = TransportState.Error("iOS refused the HID service: ${error.localizedDescription}")
             return
@@ -264,7 +224,8 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         didSubscribeToCharacteristic: CBCharacteristic,
     ) {
         mutableState.value = TransportState.Connected("host ${central.identifier.UUIDString.take(8)}")
-        flushReport()
+        reports.reset()
+        reports.offer(latestReport)
     }
 
     @ObjCSignatureOverride
@@ -279,19 +240,15 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     override fun peripheralManager(peripheral: CBPeripheralManager, didReceiveReadRequest: CBATTRequest) {
         val request = didReceiveReadRequest
         val uuid = request.characteristic.UUID.UUIDString
-        val value = if (uuid == reportCharacteristic?.UUID?.UUIDString) {
-            latestReport.toNSData()
-        } else {
-            staticValues[uuid]
+        val value = if (uuid == reportCharacteristic?.UUID?.UUIDString) latestReport else staticValues[uuid]
+        when (val read = HogpProfile.readFrom(value, request.offset.toInt())) {
+            is HogpRead.Value -> {
+                request.value = read.bytes.toNSData()
+                peripheral.respondToRequest(request, CBATTErrorSuccess)
+            }
+            HogpRead.InvalidOffset -> peripheral.respondToRequest(request, CBATTErrorInvalidOffset)
+            HogpRead.NotReadable -> peripheral.respondToRequest(request, CBATTErrorReadNotPermitted)
         }
-        val offset = request.offset
-        if (value == null || offset > value.length) {
-            peripheral.respondToRequest(request, CBATTErrorInvalidOffset)
-            return
-        }
-        // Report Map is longer than one ATT packet, so hosts read it in offset chunks.
-        request.value = value.subdataWithRange(NSMakeRange(offset, value.length - offset))
-        peripheral.respondToRequest(request, CBATTErrorSuccess)
     }
 
     override fun peripheralManager(peripheral: CBPeripheralManager, didReceiveWriteRequests: List<*>) {
@@ -302,32 +259,15 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     }
 
     override fun peripheralManagerIsReadyToUpdateSubscribers(peripheral: CBPeripheralManager) {
-        if (reportPending) flushReport()
+        reports.onReady()
     }
 }
 
-// File level, because a subclass of an Objective-C type cannot have companion fields.
-private const val HID_SERVICE = "1812"
-private const val DEVICE_INFO_SERVICE = "180A"
-private const val BATTERY_SERVICE = "180F"
-private const val HID_INFORMATION = "2A4A"
-private const val REPORT_MAP = "2A4B"
-private const val HID_CONTROL_POINT = "2A4C"
-private const val REPORT = "2A4D"
-private const val PROTOCOL_MODE = "2A4E"
-private const val PNP_ID = "2A50"
-private const val MANUFACTURER_NAME = "2A29"
-private const val BATTERY_LEVEL = "2A19"
-private const val REPORT_REFERENCE = "2908"
-private const val REPORT_TYPE_INPUT = 0x01
-private const val PROTOCOL_MODE_REPORT = 0x01
-
-private fun uUID(short: String): CBUUID = CBUUID.UUIDWithString("0000$short-0000-1000-8000-00805F9B34FB")
-
-private fun bytes(vararg values: Int): ByteArray = ByteArray(values.size) { values[it].toByte() }
+private fun cbUuid(short: Int): CBUUID = CBUUID.UUIDWithString(HogpProfile.uuidString(short))
 
 private fun onMain(block: () -> Unit) = dispatch_async(dispatch_get_main_queue(), block)
 
-private fun ByteArray.toNSData(): NSData = usePinned {
-    NSData.dataWithBytes(it.addressOf(0), size.convert())
+private fun ByteArray.toNSData(): NSData {
+    if (isEmpty()) return NSData() // addressOf(0) needs at least one byte.
+    return usePinned { NSData.dataWithBytes(it.addressOf(0), size.convert()) }
 }

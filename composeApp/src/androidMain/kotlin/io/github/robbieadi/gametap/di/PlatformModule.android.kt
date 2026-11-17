@@ -12,7 +12,7 @@ import io.github.robbieadi.gametap.layout.layoutDataStore
 import io.github.robbieadi.gametap.platform.ActivityProvider
 import io.github.robbieadi.gametap.platform.AndroidBluetoothAccess
 import io.github.robbieadi.gametap.platform.AndroidHaptics
-import io.github.robbieadi.gametap.platform.AndroidHidTransport
+import io.github.robbieadi.gametap.platform.AndroidHogpTransport
 import io.github.robbieadi.gametap.platform.AndroidMotionSensor
 import io.github.robbieadi.gametap.platform.AndroidScreenControl
 import io.github.robbieadi.gametap.platform.AndroidVolumeKeyInput
@@ -31,7 +31,7 @@ import org.koin.dsl.module
 
 actual fun platformModule(): Module = module {
     single { ActivityProvider() }
-    single<HidTransport> { AndroidHidTransport(get()) }
+    single<HidTransport> { AndroidHogpTransport(get()) }
     single { AndroidBluetoothAccess(get()) } bind BluetoothAccess::class
     single<Haptics> { AndroidHaptics(get()) }
     single<ScreenControl> { AndroidScreenControl(get()) }

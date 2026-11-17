@@ -26,22 +26,23 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private class StartingTransport(private val reconnecting: Boolean) : HidTransport {
+private class StartingTransport(override val stopsInBackground: Boolean = true) : HidTransport {
     override val state = MutableStateFlow<TransportState>(TransportState.Idle)
-    override val isReconnecting: Boolean get() = reconnecting
     var starts = 0
+    var stops = 0
 
     override suspend fun start(descriptor: ByteArray) {
         starts++
         state.value = TransportState.Advertising
     }
 
-    /** What Android does about 2 s after the app leaves the foreground. */
-    fun systemUnregisters() {
+    /** The transport going away by itself, for example when Bluetooth is turned off. */
+    fun drops() {
         state.value = TransportState.Idle
     }
 
     override suspend fun stop() {
+        stops++
         state.value = TransportState.Idle
     }
 
@@ -49,16 +50,11 @@ private class StartingTransport(private val reconnecting: Boolean) : HidTranspor
 }
 
 private class CountingAccess : BluetoothAccess {
-    var prompts = 0
     var granted = true
     var prepares = 0
-    override val needsDiscoverability: Boolean = true
     override suspend fun prepare(): Boolean {
         prepares++
         return granted
-    }
-    override fun requestDiscoverable() {
-        prompts++
     }
 }
 
@@ -79,47 +75,6 @@ class ConnectionViewModelTest {
         CoroutineScope(dispatcher),
     )
 
-    @Test
-    fun newHostIsPromptedImmediately() = runTest(dispatcher) {
-        viewModel(StartingTransport(reconnecting = false)).start()
-        runCurrent()
-        assertEquals(1, access.prompts)
-    }
-
-    @Test
-    fun pairedHostThatReconnectsIsNeverPrompted() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
-        viewModel(transport).start()
-        advanceTimeBy(1_000)
-        transport.state.value = TransportState.Connected("host")
-        advanceTimeBy(10_000)
-        runCurrent()
-        assertEquals(0, access.prompts)
-    }
-
-    @Test
-    fun pairedHostThatStaysAwayIsPromptedAfterTheWait() = runTest(dispatcher) {
-        viewModel(StartingTransport(reconnecting = true)).start()
-        advanceTimeBy(4_900)
-        runCurrent()
-        assertEquals(0, access.prompts)
-        advanceTimeBy(200)
-        runCurrent()
-        assertEquals(1, access.prompts)
-    }
-
-    @Test
-    fun stoppingDuringTheWaitCancelsThePrompt() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
-        val viewModel = viewModel(transport)
-        viewModel.start()
-        advanceTimeBy(1_000)
-        viewModel.stop()
-        advanceTimeBy(10_000)
-        runCurrent()
-        assertEquals(0, access.prompts)
-    }
-
     /** Started, connected and visible: the state the app is in during play. */
     private fun TestScope.playing(transport: StartingTransport): ConnectionViewModel {
         val viewModel = viewModel(transport)
@@ -132,12 +87,28 @@ class ConnectionViewModelTest {
     }
 
     @Test
-    fun droppedInTheBackgroundRestartsOnReturn() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
+    fun startAdvertisesAfterAccessIsGranted() = runTest(dispatcher) {
+        val transport = StartingTransport()
+        viewModel(transport).start()
+        runCurrent()
+        assertEquals(1, access.prepares)
+        assertEquals(1, transport.starts)
+        assertEquals(TransportState.Advertising, transport.state.value)
+    }
+
+    @Test
+    fun stopsAfterTwoSecondsInTheBackgroundAndRestartsOnReturn() = runTest(dispatcher) {
+        val transport = StartingTransport()
         val viewModel = playing(transport)
 
         viewModel.onAppVisible(false)
-        transport.systemUnregisters()
+        advanceTimeBy(1_900)
+        runCurrent()
+        assertEquals(0, transport.stops, "must wait before stopping")
+
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals(1, transport.stops)
         advanceTimeBy(10_000)
         runCurrent()
         assertEquals(1, transport.starts, "must not restart while away")
@@ -149,43 +120,53 @@ class ConnectionViewModelTest {
     }
 
     @Test
-    fun dropAfterReturningIsAlsoRestarted() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
+    fun quickReturnKeepsTheHost() = runTest(dispatcher) {
+        val transport = StartingTransport()
         val viewModel = playing(transport)
 
-        // Back before Android got round to unregistering.
         viewModel.onAppVisible(false)
-        viewModel.onAppVisible(true)
-        transport.systemUnregisters()
-        runCurrent()
-
-        assertEquals(2, transport.starts)
-    }
-
-    @Test
-    fun automaticRestartNeverShowsTheDiscoverablePrompt() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = false)
-        val viewModel = playing(transport)
-        val promptsBefore = access.prompts
-
-        viewModel.onAppVisible(false)
-        transport.systemUnregisters()
+        advanceTimeBy(1_000)
         viewModel.onAppVisible(true)
         advanceTimeBy(10_000)
         runCurrent()
 
+        assertEquals(0, transport.stops)
+        assertEquals(TransportState.Connected("host"), transport.state.value)
+    }
+
+    @Test
+    fun transportThatKeepsRunningIsLeftAloneInTheBackground() = runTest(dispatcher) {
+        val transport = StartingTransport(stopsInBackground = false)
+        val viewModel = playing(transport)
+
+        viewModel.onAppVisible(false)
+        advanceTimeBy(10_000)
+        runCurrent()
+
+        assertEquals(0, transport.stops)
+        assertEquals(TransportState.Connected("host"), transport.state.value)
+    }
+
+    @Test
+    fun dropWhileVisibleIsRestarted() = runTest(dispatcher) {
+        val transport = StartingTransport()
+        playing(transport)
+
+        transport.drops()
+        runCurrent()
+
         assertEquals(2, transport.starts)
-        assertEquals(promptsBefore, access.prompts)
     }
 
     @Test
     fun stopMeansStayStopped() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
+        val transport = StartingTransport()
         val viewModel = playing(transport)
 
         viewModel.stop()
         runCurrent()
         viewModel.onAppVisible(false)
+        advanceTimeBy(10_000)
         viewModel.onAppVisible(true)
         runCurrent()
 
@@ -195,11 +176,12 @@ class ConnectionViewModelTest {
 
     @Test
     fun nothingStartsBeforeTheUserPressesStart() = runTest(dispatcher) {
-        val transport = StartingTransport(reconnecting = true)
+        val transport = StartingTransport()
         val viewModel = viewModel(transport)
 
         viewModel.onAppVisible(true)
         viewModel.onAppVisible(false)
+        advanceTimeBy(10_000)
         viewModel.onAppVisible(true)
         runCurrent()
 
@@ -210,13 +192,14 @@ class ConnectionViewModelTest {
     @Test
     fun refusedPermissionIsNotAskedAgainOnReturn() = runTest(dispatcher) {
         access.granted = false
-        val transport = StartingTransport(reconnecting = true)
+        val transport = StartingTransport()
         val viewModel = viewModel(transport)
         viewModel.onAppVisible(true)
         viewModel.start()
         runCurrent()
 
         viewModel.onAppVisible(false)
+        advanceTimeBy(10_000)
         viewModel.onAppVisible(true)
         runCurrent()
 

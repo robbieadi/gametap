@@ -1,7 +1,8 @@
 # Gametap
 
 Turns an Android or iOS phone into a Bluetooth gamepad. The phone presents itself as a
-standard HID gamepad, so the host needs no companion app and no driver.
+standard HID gamepad over Bluetooth Low Energy (HID over GATT), so the host needs no companion
+app and no driver.
 
 Built with Kotlin Multiplatform and Compose Multiplatform. The HID descriptor, report
 encoding, input handling and UI are all shared; platform code only moves bytes over the radio.
@@ -11,14 +12,14 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 | Part | State |
 |------|-------|
 | Shared code (HID, input, sender, connection logic) | Unit tested |
-| Android app with a Linux host | Used on a Redmi Pad SE; every control tested one at a time |
-| Multi-touch | Unit tested in the tracker; used in a game on the Redmi Pad SE, not checked control by control |
+| Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE, but on classic Bluetooth, before the move to Low Energy |
+| Multi-touch | Unit tested in the tracker; used in a game on the Redmi Pad SE (classic Bluetooth), not checked control by control |
 | Leaving the app and coming back | Tested on the Redmi Pad SE, see [Using it](#using-it) |
 | Volume keys | Used on a Redmi Pad SE; about 150 ms slower than on-screen buttons, see [Volume keys](#volume-keys) |
 | Gyro | Tilt math and controls unit tested. iOS reader checked against CoreMotion's gravity on an iPhone 13 mini; **tilting not yet tried on a device** on either platform |
-| Windows and macOS hosts | **Not yet tested** |
-| iOS code | Compiles against the iOS SDK bindings; **never linked or run** |
-| iOS as a gamepad | **Unproven, see below** |
+| Windows hosts | **Not yet tested** |
+| macOS host | An iPhone pairs. Android not tried |
+| iOS as a gamepad | Runs on an iPhone. Pairs with Linux and macOS, and Linux creates the gamepad device. Buttons not checked one at a time, see [iOS risks](#ios-risks) |
 
 ## Build
 
@@ -41,17 +42,21 @@ Set your signing team in Xcode, then run on a real device. The simulator has no 
 
 ## Using it
 
-1. Tap **Start gamepad** and allow the Bluetooth prompts.
-2. On the host, open Bluetooth settings and pair with the phone.
+1. Tap **Start gamepad** and allow the Bluetooth prompts. The phone starts advertising.
+2. On the host, open Bluetooth settings and pair with the phone. Both sides show a 6-digit code;
+   confirm it on both. On Linux this needs a pairing agent, see [Linux hosts](#linux-hosts).
 3. The gamepad opens when the host connects.
 
-After the first pairing, **Start gamepad** reconnects to that host by itself. The discoverable
-prompt only appears if no paired host reconnects within 5 seconds.
+After the first pairing, the host reconnects by itself, usually within a second of **Start
+gamepad**.
 
 On Android, the host loses the gamepad about 2 seconds after Gametap leaves the screen, for
-example after Home or locking the phone. Android unregisters any HID device app that is no
-longer visible. Coming back reconnects by itself, in about a second, unless you pressed **Stop**.
-Any control held when you leave is released first.
+example after Home or locking the phone. Gametap stops advertising then, so the phone does not
+keep the radio busy for a game that cannot see the screen. Coming back reconnects by itself, in
+under a second, unless you pressed **Stop**. Any control held when you leave is released first.
+
+On iOS the gamepad keeps running in the background. If you close Gametap from the app switcher
+or restart the phone, a Linux host may stop reconnecting, see [Linux hosts](#linux-hosts).
 
 Hold the three dots in the top-left corner of the gamepad to open settings.
 
@@ -108,41 +113,102 @@ Steam controller settings, or `evtest` / `jstest` on Linux.
 
 - **XInput-only games.** Hosts see a generic HID gamepad (DirectInput-style on Windows). Steam,
   emulators and most modern games accept it. XInput-only games need Steam Input or a mapper.
-- **Android phones without the HID Device profile.** Some makers disable it. The app then shows
-  "Not supported on this device".
+- **Android phones that cannot advertise over Bluetooth Low Energy.** Mostly older or budget
+  devices. The app then says the phone cannot act as a controller.
 - **No connection in the background on Android.** Games may pause or report a disconnected
   controller while you are in another app. Staying connected would need a foreground service,
   which shows a notification while it runs. It is not built, and HyperOS and similar systems may
   stop it anyway.
 - **Descriptor changes.** Hosts cache the descriptor. Remove the device from the host's Bluetooth
   settings, forget the host on the phone, and pair again after any change.
-- **Placeholder iOS PnP ID.** It uses pid.codes test values. Replace it before release.
+- **Placeholder PnP ID.** `HogpProfile.pnpId` uses pid.codes test values (1209:0001). Replace it
+  before release.
+- **The host may show the phone's own name and ID.** See [Linux hosts](#linux-hosts).
+
+### Linux hosts
+
+These were found with BlueZ 5.87. Other desktops and BlueZ versions may differ.
+
+- **A pairing agent must be running.** Pairing needs a 6-digit code confirmed on both sides, and
+  BlueZ hands that to a separate agent program. GNOME, KDE and shells such as Noctalia include
+  one; a bare compositor such as niri does not. Without one, pairing fails with
+  `No agent available` in `journalctl -u bluetooth`. Run `bluetoothctl` in a terminal while
+  pairing, or start an agent such as `blueman-applet`. An agent registered before bluetoothd
+  restarts is lost, so restart the shell or agent after restarting Bluetooth.
+- **Phones pair over classic Bluetooth too.** Pairing over Low Energy also gives the host classic
+  Bluetooth keys, and BlueZ shows one device with both. A plain connect, including
+  `bluetoothctl connect` and most desktop Connect buttons, uses whichever was used last, which is
+  often classic. That fails or connects only the phone's audio. To connect the gamepad, open
+  Gametap and run, with the phone's address:
+
+  ```sh
+  busctl --system call org.bluez /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF org.bluez.Bearer.LE1 Connect
+  ```
+
+  It may need a scan running first (`bluetoothctl scan le`). Once the gamepad has connected,
+  BlueZ reconnects it by itself. To make plain connects use Low Energy, set `Experimental = true`
+  in `/etc/bluetooth/main.conf`, restart Bluetooth, and set
+  `busctl --system set-property org.bluez /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF org.bluez.Device1 PreferredBearer s le`.
+  This last step is untested.
+- **If an iPhone stops reconnecting.** When Gametap is closed, the host forgets the gamepad
+  service. If the iPhone reconnects to the host in that state, for example after a restart, the
+  host no longer reconnects the gamepad. Open Gametap and connect as above.
+- **Phones send their audio to the PC.** PipeWire lets phones use the PC as a speaker and call
+  headset by default, and the phone then plays game sounds through the PC. To turn that off for
+  all phones while keeping Bluetooth headphones working, create
+  `~/.config/wireplumber/wireplumber.conf.d/51-no-phone-audio.conf` with
+  `monitor.bluez.properties = { bluez5.roles = [ a2dp_source hfp_ag bap_source ] }` and run
+  `systemctl --user restart wireplumber`.
+- **The gamepad may show the phone's name and ID.** BlueZ names the gamepad after the phone and
+  takes the vendor and product ID from the device record it saw last: the phone's own classic
+  Bluetooth record (for example Apple 004C:7504) or Gametap's PnP ID. The ID can change between
+  connections, so Steam may treat it as a new controller. Apps cannot change this; the fix would
+  be in BlueZ.
 
 ## Latency
 
-Measured on a Redmi Pad SE paired with a Linux PC, from 159 injected button presses and releases
-(`cmd input motionevent`) with pauses of 0.3 to 0.7 s between them:
+Measured against a Linux PC from injected presses of A (`input motionevent` over adb, 0.7 s
+apart), comparing the phone's clock when the app had received the touch with evdev's time on the
+PC. The clocks were synced over adb to within about 6 to 8 ms, so the table gives the spread
+between the fastest and slowest press in each run of 15, which does not depend on that sync.
+Every press arrived.
 
-| Stage | Median | p90 | Max |
-|-------|--------|-----|-----|
-| Input dispatcher to report sent | 6 ms | 11 ms | 13 ms |
-| Report sent to PC | 11 ms | 17 ms | 24 ms |
-| End to end | 18 ms | 24 ms | 30 ms |
+| Device | Transport | Presses | Spread per run | Notes |
+|--------|-----------|---------|----------------|-------|
+| Redmi Pad SE | Low Energy | 75 | 17 to 64 ms | Mostly within 20 ms; 2 presses near 60 ms |
+| Galaxy A54 | Low Energy, phone Wi-Fi off | 60 | 12 to 42 ms | |
+| Galaxy A54 | Low Energy, phone Wi-Fi on | 60 | 47 to 270 ms | Two of four runs had stretches of 100 to 250 ms delays, see below |
+| Galaxy A54 | Classic, before the move | 30 | 391 to 709 ms | Phone connected to the PC |
+| Galaxy A54 | Classic, before the move | 30 | 31 to 36 ms | PC connected to the phone |
+| Redmi Pad SE | Classic, before the move | 30 | 22 to 49 ms | |
 
-On the tablet, `atrace` timed each touch from Android's input dispatcher to the app's
-`sendReport` binder call. On the PC, the times come from evdev. The two clocks were synced over
-adb to within about 1.5 ms. The touchscreen's own scan delay is not included, so a real finger
-adds a few milliseconds.
+**Why Low Energy.** Classic Bluetooth HID puts an idle link into sniff mode, a power saving state
+where the radio only wakes at intervals. Samsung phones let it sleep for up to 750 ms, and kept
+doing so while reports were flowing. That stalled presses and occasionally lost them. It was
+worst when the PC was central, the side that runs the radio schedule, and Linux takes that role
+whenever the phone connects, because BlueZ's audio services ask for it. Apps cannot choose the
+role or turn sniff off. Low Energy has no sniff mode: the host polls at a fixed connection
+interval and a report goes out at the next poll, whichever side connected.
 
-The link dominates. An idle link falls into Bluetooth sniff subrating, which raised send-to-PC
-time to a median of 66 ms and a maximum of 180 ms. Android has no public API to turn sniff off, so
-`ReportSender` repeats the last report every 16 ms while the gamepad screen is open. Do not remove
-this to save traffic. It costs some battery, so it stops when the gamepad screen closes or the
-app leaves the foreground.
+**Phone Wi-Fi.** Phones share one radio between Wi-Fi and Bluetooth, which take turns. On the
+Galaxy A54, with Wi-Fi on, delays rose to 100 to 250 ms for stretches of several seconds, then
+recovered; with Wi-Fi off, every run stayed within 42 ms, on the same build and connection. The
+Redmi Pad SE, tested with Wi-Fi on, only had occasional presses near 60 ms. Whether moving the
+phone to 5 GHz Wi-Fi is enough has not been tested. If a phone stutters, try it with Wi-Fi off.
 
-Reports are capped at one per 8 ms. Both intervals count from when a send starts, because
-`sendReport` blocks for about 1.5 ms and occasionally 10 ms. Timers fire slightly late, so the
-keep-alive measures about 17 ms. Stricter HID QoS settings did not improve latency.
+**Connection interval.** Android gives a GATT server no way to ask for a short interval, so
+`AndroidHogpTransport` also opens a GATT client back to the host on the same link and requests high
+priority (11.25 to 15 ms). Samsung's Bluetooth log shows Linux starting the link at 45 ms; once
+the request has been accepted, BlueZ saves it and later connections start at 15 ms. Without the
+request the A54's spread was 85 to 102 ms against 43 to 70 ms with it, but both were measured with
+the phone's Wi-Fi on, so treat that comparison as rough.
+
+**Report pacing.** Reports are capped at one per 8 ms, and `ReportSender` repeats the last report
+every 16 ms while the gamepad screen is open. The repeat was added because classic Bluetooth
+fell into sniff mode on an idle link. On Low Energy it still helps a little: on the Redmi Pad SE,
+with it the p90 was 18 ms above the fastest press (90 presses), without it 28 ms (45 presses). It
+stops when the gamepad screen closes. Both intervals count from when a send starts. Android allows one
+notification in flight, so a newer report replaces one still waiting to go out.
 
 ## Axis mapping
 
@@ -164,20 +230,19 @@ when they exist and then reads Z/Rz as the triggers, which crosses the two contr
 
 ## iOS risks
 
-iOS has no public HID device role, so `IosHogpTransport` builds the HID GATT service by hand.
-These points are the first things to check on a device:
+iOS has no public HID device role, so `IosHogpTransport` builds the HID GATT service by hand,
+with the same layout as Android. What has been seen on an iPhone so far:
 
-- Apple has reportedly reserved the HID service for the system. Full 128-bit UUIDs are used
-  because an open-source app is reported to get past the check that way, but that app only
-  ships keyboard and mouse, so a **gamepad** descriptor is unproven.
+- Apple has reportedly reserved the HID service for the system. With full 128-bit UUIDs, iOS
+  published it with the gamepad descriptor, and Linux read it and created a gamepad device.
 - `CBMutableDescriptor` is documented to accept only two descriptor types. The Report Reference
-  descriptor (`0x2908`) is neither, so creating it may throw at runtime.
+  descriptor (`0x2908`) is neither, but creating it did not throw and the service was published.
 - CoreBluetooth advertises only a name and service UUIDs, so gamepad appearance (`0x03C4`) cannot
-  be advertised. Hosts may show a generic icon or filter the device out.
+  be advertised. Linux and macOS paired anyway; Windows is untested.
 - iOS does not reveal the host name, so the status shows a short identifier instead.
 
-If iOS refuses the service, the status pill shows the error. A keyboard and mouse fallback is
-the planned mitigation and is not built.
+Still to check on an iPhone: every control one at a time, and latency. If iOS refuses the
+service, the status pill shows the error.
 
 ## Layout
 

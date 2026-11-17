@@ -23,9 +23,5 @@ class IosScreenControl : ScreenControl {
 
 /** CoreBluetooth prompts for access itself when the peripheral manager is created. */
 class IosBluetoothAccess : BluetoothAccess {
-    override val needsDiscoverability: Boolean = false
-
     override suspend fun prepare(): Boolean = true
-
-    override fun requestDiscoverable() = Unit
 }

@@ -34,7 +34,6 @@ fun ConnectScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val permissionDenied by viewModel.permissionDenied.collectAsState()
-    val isConnected = state is TransportState.Connected
 
     Column(
         modifier = Modifier
@@ -64,18 +63,10 @@ fun ConnectScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Start gamepad") }
 
-                TransportState.Advertising, is TransportState.Connected -> {
-                    if (viewModel.needsDiscoverability && !isConnected) {
-                        Button(
-                            onClick = viewModel::requestDiscoverable,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Make discoverable") }
-                    }
-                    OutlinedButton(
-                        onClick = viewModel::stop,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Stop") }
-                }
+                TransportState.Advertising, is TransportState.Connected -> OutlinedButton(
+                    onClick = viewModel::stop,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Stop") }
 
                 TransportState.Unsupported -> Unit
             }
@@ -92,7 +83,7 @@ fun ConnectScreen(
 private fun helpText(state: TransportState, permissionDenied: Boolean): String = when {
     permissionDenied -> "Gametap needs Bluetooth access. Turn Bluetooth on and allow the permission, then try again."
     state == TransportState.Unsupported ->
-        "This phone does not offer the Bluetooth gamepad role, so it cannot act as a controller."
+        "This phone cannot advertise as a Bluetooth Low Energy device, so it cannot act as a controller."
     state == TransportState.Advertising ->
         "On your PC, open Bluetooth settings, add a device and choose this phone."
     state is TransportState.Connected -> "Hold the ☰ button on the gamepad for the menu."

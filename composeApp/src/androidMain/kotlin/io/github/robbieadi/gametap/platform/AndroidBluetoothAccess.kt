@@ -18,11 +18,8 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
     private val appContext = context.applicationContext
     private var permissionLauncher: ActivityResultLauncher<Array<String>>? = null
     private var enableLauncher: ActivityResultLauncher<Intent>? = null
-    private var discoverableLauncher: ActivityResultLauncher<Intent>? = null
     private var pendingPermission: CompletableDeferred<Boolean>? = null
     private var pendingEnable: CompletableDeferred<Unit>? = null
-
-    override val needsDiscoverability: Boolean = true
 
     /** Call from Activity.onCreate: result launchers must be registered before the activity starts. */
     fun attach(activity: ComponentActivity) {
@@ -32,9 +29,6 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
         enableLauncher = activity.registerForActivityResult(
             ActivityResultContracts.StartActivityForResult(),
         ) { pendingEnable?.complete(Unit) }
-        discoverableLauncher = activity.registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult(),
-        ) {}
     }
 
     override suspend fun prepare(): Boolean {
@@ -43,12 +37,6 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
         if (!hasPermissions() && !requestPermissions()) return false
         if (!isEnabled(adapter)) requestEnable()
         return isEnabled(adapter)
-    }
-
-    override fun requestDiscoverable() {
-        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
-            .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, DISCOVERABLE_SECONDS)
-        discoverableLauncher?.launch(intent)
     }
 
     private fun hasPermissions(): Boolean = REQUIRED_PERMISSIONS.all {
@@ -75,8 +63,6 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
     private fun isEnabled(adapter: BluetoothAdapter): Boolean = adapter.isEnabled
 
     private companion object {
-        const val DISCOVERABLE_SECONDS = 300
-
         val REQUIRED_PERMISSIONS: Array<String> =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
