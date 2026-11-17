@@ -74,16 +74,19 @@ import io.github.robbieadi.gametap.layout.GyroHorizontal
 import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.layout.GyroTarget
 import io.github.robbieadi.gametap.layout.LayoutEditor
-import io.github.robbieadi.gametap.layout.GYRO_SWITCHES
 import io.github.robbieadi.gametap.layout.LayoutIssue
+import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.NewControl
 import io.github.robbieadi.gametap.layout.ScreenSize
 import io.github.robbieadi.gametap.layout.Shape
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKey
 import io.github.robbieadi.gametap.layout.area
+import io.github.robbieadi.gametap.layout.blockedGyroSwitches
 import io.github.robbieadi.gametap.layout.centerX
 import io.github.robbieadi.gametap.layout.controlIds
 import io.github.robbieadi.gametap.layout.isGyro
+import io.github.robbieadi.gametap.layout.isVolumeKeys
 import io.github.robbieadi.gametap.ui.components.GamepadCanvas
 import io.github.robbieadi.gametap.ui.components.OverlayDialog
 import io.github.robbieadi.gametap.ui.components.consumeTouchDowns
@@ -97,6 +100,9 @@ import kotlin.math.roundToInt
 
 /** Height of the band the toolbar occupies, used to move it out of the selected control's way. */
 private val TOOLBAR_BAND = 72.dp
+
+/** The profile-wide settings panels, shown when no control is selected. */
+private enum class Panel { GYRO, VOLUME_KEYS }
 
 @Composable
 fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
@@ -121,9 +127,14 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
         var preferBottom by rememberSaveable { mutableStateOf(false) }
         var renaming by remember { mutableStateOf(false) }
         var confirmDiscard by remember { mutableStateOf(false) }
-        var showGyro by rememberSaveable { mutableStateOf(false) }
-        // Selecting a control swaps the gyro panel for the control's own.
-        LaunchedEffect(state.selectedId) { if (state.selectedId != null) showGyro = false }
+        var panel by rememberSaveable { mutableStateOf<Panel?>(null) }
+        // Selecting a control swaps the profile panel for the control's own.
+        LaunchedEffect(state.selectedId) { if (state.selectedId != null) panel = null }
+
+        fun toggle(next: Panel) {
+            editor.select(null)
+            panel = if (panel == next) null else next
+        }
 
         fun close() {
             if (viewModel.hasUnsavedChanges()) confirmDiscard = true else onClose()
@@ -135,7 +146,7 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
                 when {
                     renaming -> renaming = false
                     confirmDiscard -> confirmDiscard = false
-                    showGyro -> showGyro = false
+                    panel != null -> panel = null
                     else -> close()
                 }
             },
@@ -185,10 +196,10 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
                 onClose = ::close,
                 onRename = { renaming = true },
                 onFlip = { preferBottom = !atBottom },
-                onGyro = {
-                    editor.select(null)
-                    showGyro = !showGyro
-                },
+                onGyro = { toggle(Panel.GYRO) },
+                // Hidden where the keys cannot be captured. Layouts stay on the device they were
+                // made on, so none there can have keys bound.
+                onVolumeKeys = if (viewModel.volumeKeysAvailable) ({ toggle(Panel.VOLUME_KEYS) }) else null,
                 onSave = { scope.launch { if (viewModel.save()) onClose() } },
                 modifier = Modifier.align(if (atBottom) Alignment.BottomCenter else Alignment.TopCenter),
             )
@@ -206,7 +217,18 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
                         .heightIn(max = maxHeight - 16.dp),
                 )
             }
-            if (showGyro && state.selected == null) {
+            if (panel == Panel.VOLUME_KEYS && state.selected == null) {
+                VolumeKeysPanel(
+                    draft = state.draft,
+                    editor = editor,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(8.dp)
+                        .width(280.dp)
+                        .heightIn(max = maxHeight - 16.dp),
+                )
+            }
+            if (panel == Panel.GYRO && state.selected == null) {
                 GyroPanel(
                     setup = state.draft.gyro,
                     available = viewModel.gyroAvailable,
@@ -299,6 +321,7 @@ private fun Toolbar(
     onRename: () -> Unit,
     onFlip: () -> Unit,
     onGyro: () -> Unit,
+    onVolumeKeys: (() -> Unit)?,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -319,11 +342,12 @@ private fun Toolbar(
         TextButton(onClick = editor::redo, enabled = state.canRedo) { Text("↷", fontSize = 22.sp) }
         if (state.issues.isNotEmpty()) {
             val onlyName = state.issues.all { it is LayoutIssue.BlankName || it is LayoutIssue.DuplicateName }
-            val onlyGyro = state.issues.controlIds().isEmpty() && state.issues.any { it.isGyro }
+            val noControls = state.issues.controlIds().isEmpty()
             TextButton(
                 onClick = when {
                     onlyName -> onRename
-                    onlyGyro -> onGyro
+                    noControls && onVolumeKeys != null && state.issues.any { it.isVolumeKeys } -> onVolumeKeys
+                    noControls && state.issues.any { it.isGyro } -> onGyro
                     else -> editor::selectNextIssue
                 },
             ) {
@@ -353,6 +377,7 @@ private fun Toolbar(
             }
         }
         TextButton(onClick = onGyro) { Text("Gyro") }
+        if (onVolumeKeys != null) TextButton(onClick = onVolumeKeys) { Text("Keys") }
         TextButton(onClick = onFlip) { Text("⇅") }
         Button(onClick = onSave, enabled = state.issues.isEmpty(), modifier = Modifier.padding(start = 4.dp)) {
             Text("Save")
@@ -377,11 +402,10 @@ private fun ControlPanel(control: GamepadControl, state: EditorState, editor: La
         if (control is GamepadControl.ButtonControl) {
             Field("Sends") {
                 // Gyro on/off and Gyro on while held exclude each other, so offer only the kind in use.
-                val usedSwitches = state.draft.controls
+                val others = state.draft.controls
                     .filter { it.id != control.id }
-                    .mapNotNullTo(HashSet()) { (it as? GamepadControl.ButtonControl)?.action?.takeIf { a -> a in GYRO_SWITCHES } }
-                val blocked = if (usedSwitches.isEmpty()) emptySet() else GYRO_SWITCHES - usedSwitches
-                ActionPicker(control.action, blocked, editor::setAction)
+                    .mapNotNull { (it as? GamepadControl.ButtonControl)?.action } + state.draft.volumeKeys.actions
+                ActionPicker(control.action, blockedGyroSwitches(others)) { it?.let(editor::setAction) }
             }
         }
         val label = when (control) {
@@ -481,12 +505,29 @@ private fun ButtonAction.displayName(): String = when (this) {
     }
 }
 
+/** [none] names a choice of no action, offered first and shown for a null [action]; null offers none. */
 @Composable
-private fun ActionPicker(action: ButtonAction, blocked: Set<ButtonAction>, onPick: (ButtonAction) -> Unit) {
+private fun ActionPicker(
+    action: ButtonAction?,
+    blocked: Set<ButtonAction>,
+    none: String? = null,
+    onPick: (ButtonAction?) -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) { Text("${action.displayName()} ▾") }
+        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("${action?.displayName() ?: none.orEmpty()} ▾")
+        }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (none != null) {
+                DropdownMenuItem(
+                    text = { Text(none) },
+                    onClick = {
+                        open = false
+                        onPick(null)
+                    },
+                )
+            }
             ALL_ACTIONS.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(option.displayName()) },
@@ -507,6 +548,49 @@ private fun GamepadControl.kindName(): String = when (this) {
     is GamepadControl.StickControl -> "Stick"
     is GamepadControl.ThrottleControl -> "Analog trigger"
     is GamepadControl.DpadControl -> "D-pad"
+}
+
+/** What the volume keys send, for the whole profile. */
+@Composable
+private fun VolumeKeysPanel(
+    draft: LayoutProfile,
+    editor: LayoutEditor,
+    modifier: Modifier = Modifier,
+) {
+    val scroll = rememberScrollState()
+    Column(
+        modifier
+            .consumeTouchDowns()
+            .background(GamepadColors.Surface, RoundedCornerShape(16.dp))
+            .scrollIndicator(scroll, GamepadColors.Label.copy(alpha = 0.4f))
+            .verticalScroll(scroll)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Volume keys", style = MaterialTheme.typography.titleSmall, color = GamepadColors.Label)
+        Text(
+            "A bound key sends its input while held instead of changing the volume. The keys change " +
+                "the volume again while the menu is open.",
+            style = MaterialTheme.typography.bodySmall,
+            color = GamepadColors.Label.copy(alpha = 0.7f),
+        )
+        Text(
+            "Android holds volume key presses back about 150 ms to check for shortcuts like " +
+                "volume down + power, so these keys respond later than on-screen buttons. Use them " +
+                "for actions where timing matters less, such as gyro hold or recenter.",
+            style = MaterialTheme.typography.bodySmall,
+            color = GamepadColors.Warning,
+        )
+        val buttons = draft.controls.mapNotNull { (it as? GamepadControl.ButtonControl)?.action }
+        VolumeKey.entries.forEach { key ->
+            Field(if (key == VolumeKey.UP) "Volume up" else "Volume down") {
+                val other = draft.volumeKeys.with(key, null).actions
+                ActionPicker(draft.volumeKeys[key], blockedGyroSwitches(buttons + other), none = "Volume (unbound)") {
+                    editor.setVolumeKey(key, it)
+                }
+            }
+        }
+    }
 }
 
 /** Which outputs tilting the phone drives, for the whole profile. */

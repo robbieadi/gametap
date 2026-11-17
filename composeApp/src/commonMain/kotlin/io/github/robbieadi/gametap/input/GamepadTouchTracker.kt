@@ -16,6 +16,7 @@ import io.github.robbieadi.gametap.layout.GyroButton
 import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.ScreenSize
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKey
 import io.github.robbieadi.gametap.layout.area
 import io.github.robbieadi.gametap.layout.contains
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +54,8 @@ data class TouchView(
  * free: it presses whichever button is under it, which gives slide-on and slide-off. Where
  * controls overlap, the one drawn on top (later in the list) owns the touch. The state is rebuilt
  * from all live pointers after each event, so controls that send the same input combine: buttons
- * and D-pad directions add up, and a trigger takes its highest value.
+ * and D-pad directions add up, and a trigger takes its highest value. Held volume keys join in
+ * the same way, with the action the profile binds to them.
  *
  * Everything is in pixels and has no Compose dependency, so it can be unit tested.
  */
@@ -75,6 +77,7 @@ class GamepadTouchTracker(
     /** Topmost first, so the first hit is the control drawn on top. */
     private var placed: List<Placed> = place()
     private val pointers = LinkedHashMap<Long, Pointer>()
+    private val keys = HashSet<VolumeKey>()
     private var lastDigital = 0L
 
     private val mutableView = MutableStateFlow(TouchView())
@@ -86,6 +89,7 @@ class GamepadTouchTracker(
         if (layout == this.layout) return
         this.layout = layout
         pointers.clear()
+        keys.clear()
         placed = place()
         publish()
     }
@@ -118,8 +122,15 @@ class GamepadTouchTracker(
         if (pointers.remove(id) != null) publish()
     }
 
+    /** A volume key went down or up. Keys the profile leaves unbound send nothing. */
+    fun key(key: VolumeKey, pressed: Boolean) {
+        val changed = if (pressed) keys.add(key) else keys.remove(key)
+        if (changed) publish()
+    }
+
     fun releaseAll() {
         pointers.clear()
+        keys.clear()
         publish()
     }
 
@@ -158,21 +169,31 @@ class GamepadTouchTracker(
             }
         }
 
+        fun send(action: ButtonAction) {
+            when (action) {
+                is ButtonAction.Pad -> buttons = buttons or action.button.mask
+                is ButtonAction.Dpad -> dpad = dpad + action.direction
+                is ButtonAction.Trigger -> {
+                    pullTrigger(action.side, 1f)
+                    triggerButtons = triggerButtons or (1 shl action.side.ordinal)
+                }
+                is ButtonAction.Gyro -> gyroButtons += action.action
+            }
+        }
+
+        fun digital(): Long {
+            val gyroBits = gyroButtons.fold(0) { bits, button -> bits or (1 shl button.ordinal) }
+            return buttons.toLong() or (dpad.bits().toLong() shl 32) or (triggerButtons.toLong() shl 40) or
+                (gyroBits.toLong() shl 44)
+        }
+
         for (pointer in pointers.values) {
             val captured = pointer.captured
             if (captured == null) {
                 when (val control = topmostAt(pointer.x, pointer.y)?.control) {
                     is ButtonControl -> {
                         pressed += control.id
-                        when (val action = control.action) {
-                            is ButtonAction.Pad -> buttons = buttons or action.button.mask
-                            is ButtonAction.Dpad -> dpad = dpad + action.direction
-                            is ButtonAction.Trigger -> {
-                                pullTrigger(action.side, 1f)
-                                triggerButtons = triggerButtons or (1 shl action.side.ordinal)
-                            }
-                            is ButtonAction.Gyro -> gyroButtons += action.action
-                        }
+                        send(control.action)
                     }
                     is MenuControl -> {
                         pressed += control.id
@@ -206,12 +227,12 @@ class GamepadTouchTracker(
             }
         }
 
-        // Every digital input in one mask, so a newly pressed one of any kind gives one buzz.
-        val gyroBits = gyroButtons.fold(0) { bits, button -> bits or (1 shl button.ordinal) }
-        val digital = buttons.toLong() or (dpad.bits().toLong() shl 32) or (triggerButtons.toLong() shl 40) or
-            (gyroBits.toLong() shl 44)
-        if (digital and lastDigital.inv() != 0L) onPress()
-        lastDigital = digital
+        // Every touched digital input in one mask, so a newly pressed one of any kind gives one
+        // buzz. Taken before the keys join in: a volume key clicks by itself.
+        val touched = digital()
+        if (touched and lastDigital.inv() != 0L) onPress()
+        lastDigital = touched
+        for (key in keys) layout.volumeKeys[key]?.let(::send)
 
         mutableView.value = TouchView(pressed, dpads, throttles, sticks, menuHeld)
         input.set(GamepadState(buttons, dpad, leftStick, rightStick, leftTrigger, rightTrigger))

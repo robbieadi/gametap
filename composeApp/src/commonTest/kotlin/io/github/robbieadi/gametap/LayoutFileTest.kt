@@ -1,11 +1,14 @@
 package io.github.robbieadi.gametap
 
 import androidx.datastore.core.CorruptionException
+import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.Anchor
+import io.github.robbieadi.gametap.layout.ButtonAction
 import io.github.robbieadi.gametap.layout.DefaultLayout
 import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GyroAxis
 import io.github.robbieadi.gametap.layout.GyroBinding
+import io.github.robbieadi.gametap.layout.GyroButton
 import io.github.robbieadi.gametap.layout.GyroHorizontal
 import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.layout.LayoutProfile
@@ -14,6 +17,7 @@ import io.github.robbieadi.gametap.layout.LayoutStore
 import io.github.robbieadi.gametap.layout.LayoutStoreSerializer
 import io.github.robbieadi.gametap.layout.Position
 import io.github.robbieadi.gametap.layout.Shape
+import io.github.robbieadi.gametap.layout.VolumeKeys
 import kotlinx.coroutines.test.runTest
 import okio.Buffer
 import kotlin.test.Test
@@ -91,5 +95,29 @@ class LayoutFileTest {
             """.trimIndent(),
         )
         assertEquals(GyroSetup(), store.profiles.single().gyro)
+    }
+
+    @Test
+    fun volumeKeysReadBack() = runTest {
+        val keys = VolumeKeys(up = ButtonAction.Pad(Button.RB), down = ButtonAction.Gyro(GyroButton.HOLD))
+        val store = LayoutStore(activeProfileId = racing.id, profiles = listOf(racing.copy(volumeKeys = keys)))
+        val buffer = Buffer()
+        LayoutStoreSerializer.writeTo(store, buffer)
+        assertEquals(store, LayoutStoreSerializer.readFrom(buffer))
+    }
+
+    /** Written before volume keys existed. */
+    @Test
+    fun profileWithoutVolumeKeysReadsUnbound() = runTest {
+        val store = read(
+            """
+            {"version":1,"activeProfileId":"racing","profiles":[
+              {"id":"racing","name":"Racing","controls":[
+                {"type":"menu","id":"menu","position":{"anchor":"left","x":0.1,"y":0.1},
+                 "shape":{"type":"circle","r":0.05},"label":"☰"}]}
+            ]}
+            """.trimIndent(),
+        )
+        assertEquals(VolumeKeys(), store.profiles.single().volumeKeys)
     }
 }

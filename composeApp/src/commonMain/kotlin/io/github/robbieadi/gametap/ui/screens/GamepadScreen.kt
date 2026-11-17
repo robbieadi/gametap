@@ -77,6 +77,8 @@ fun GamepadScreen(
         }
     }
 
+    LaunchedEffect(menuOpen) { viewModel.setMenuOpen(menuOpen) }
+
     // While the menu is open, Back closes it instead of leaving the gamepad.
     NavigationBackHandler(
         state = rememberNavigationEventState(NavigationEventInfo.None),

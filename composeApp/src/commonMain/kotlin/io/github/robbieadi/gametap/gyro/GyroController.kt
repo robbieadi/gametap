@@ -1,7 +1,6 @@
 package io.github.robbieadi.gametap.gyro
 
 import io.github.robbieadi.gametap.layout.GYRO_SWITCHES
-import io.github.robbieadi.gametap.layout.GamepadControl
 import io.github.robbieadi.gametap.layout.GyroButton
 import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.layout.LayoutProfile
@@ -14,7 +13,7 @@ import kotlin.concurrent.Volatile
 /**
  * Turns orientation samples into [GyroOutput] for the active profile.
  *
- * A profile without a gyro on/off or hold button has gyro on all the time. Otherwise it is on
+ * A profile without a gyro on/off or hold button or volume key has gyro on all the time. Otherwise it is on
  * while a [GyroButton.TOGGLE], which starts off, has turned it on, or while a [GyroButton.HOLD] is
  * held. Validation allows only one of the two, so the player turns gyro on once their grip is
  * settled and that angle becomes neutral.
@@ -45,7 +44,7 @@ class GyroController(private val sink: (GyroOutput) -> Unit) {
     /** A new profile starts toggled off and recentered. */
     fun setLayout(profile: LayoutProfile) {
         setup = profile.gyro
-        switched = profile.controls.any { (it as? GamepadControl.ButtonControl)?.action in GYRO_SWITCHES }
+        switched = profile.buttonActions.any { it in GYRO_SWITCHES }
         mutableToggledOn.value = false
         recenter()
     }

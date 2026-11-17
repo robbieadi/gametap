@@ -266,6 +266,11 @@ class LayoutEditor(
     private fun editGyro(key: String? = null, transform: (GyroSetup) -> GyroSetup) =
         edit(key) { it.copy(gyro = transform(it.gyro)) }
 
+    // ---------- Volume keys ----------
+
+    /** Null leaves the key changing the volume. */
+    fun setVolumeKey(key: VolumeKey, action: ButtonAction?) = edit { it.copy(volumeKeys = it.volumeKeys.with(key, action)) }
+
     // ---------- Adding and removing ----------
 
     fun add(kind: NewControl) {

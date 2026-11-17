@@ -243,6 +243,30 @@ sealed interface GamepadControl {
     ) : GamepadControl
 }
 
+/** The phone's hardware keys a profile can bind. */
+enum class VolumeKey { UP, DOWN }
+
+/**
+ * What the volume keys send while held. A null key keeps changing the volume. Keys the platform
+ * cannot capture, as on iOS, are kept with the profile for other phones.
+ */
+@Serializable
+data class VolumeKeys(val up: ButtonAction? = null, val down: ButtonAction? = null) {
+    operator fun get(key: VolumeKey): ButtonAction? = when (key) {
+        VolumeKey.UP -> up
+        VolumeKey.DOWN -> down
+    }
+
+    fun with(key: VolumeKey, action: ButtonAction?): VolumeKeys = when (key) {
+        VolumeKey.UP -> copy(up = action)
+        VolumeKey.DOWN -> copy(down = action)
+    }
+
+    val actions: List<ButtonAction> get() = listOfNotNull(up, down)
+
+    val isEmpty: Boolean get() = up == null && down == null
+}
+
 @Serializable
 data class LayoutProfile(
     val id: String,
@@ -250,7 +274,13 @@ data class LayoutProfile(
     val controls: List<GamepadControl>,
     /** Defaults to no bindings, so files written before gyro existed still read. */
     val gyro: GyroSetup = GyroSetup(),
-)
+    /** Defaults to none, so files written before volume keys existed still read. */
+    val volumeKeys: VolumeKeys = VolumeKeys(),
+) {
+    /** What every button control and bound volume key sends. */
+    val buttonActions: List<ButtonAction>
+        get() = controls.mapNotNull { (it as? GamepadControl.ButtonControl)?.action } + volumeKeys.actions
+}
 
 /** Everything the layout file holds. [version] lets a later format migrate older files. */
 @Serializable

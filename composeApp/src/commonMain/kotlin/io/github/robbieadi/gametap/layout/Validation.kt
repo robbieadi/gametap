@@ -23,8 +23,11 @@ sealed interface LayoutIssue {
 
     data object InvalidGyroDeadzone : LayoutIssue
 
-    /** Both a Gyro on/off and a Gyro on while held button; a layout uses one way or the other. */
-    data class ConflictingGyroButtons(val ids: List<String>) : LayoutIssue
+    /**
+     * Both a Gyro on/off and a Gyro on while held, on buttons ([ids]) or volume keys ([keys]); a
+     * layout uses one way or the other.
+     */
+    data class ConflictingGyroButtons(val ids: List<String>, val keys: List<VolumeKey> = emptyList()) : LayoutIssue
 }
 
 /**
@@ -56,9 +59,10 @@ fun LayoutProfile.validate(screen: ScreenSize, otherNames: Set<String> = emptySe
             .mapTo(LinkedHashSet()) { it.target }
             .forEach { add(LayoutIssue.InvalidGyroBinding(it)) }
         if (gyro.deadzone !in 0f..GyroSetup.MAX_DEADZONE) add(LayoutIssue.InvalidGyroDeadzone)
-        val switches = controls.filter { (it as? GamepadControl.ButtonControl)?.action in GYRO_SWITCHES }
-        if (switches.mapTo(HashSet()) { (it as GamepadControl.ButtonControl).action }.size > 1) {
-            add(LayoutIssue.ConflictingGyroButtons(switches.map { it.id }))
+        if (buttonActions.filterTo(HashSet()) { it in GYRO_SWITCHES }.size > 1) {
+            val ids = controls.filter { (it as? GamepadControl.ButtonControl)?.action in GYRO_SWITCHES }.map { it.id }
+            val keys = VolumeKey.entries.filter { volumeKeys[it] in GYRO_SWITCHES }
+            add(LayoutIssue.ConflictingGyroButtons(ids, keys))
         }
 
         val areas = controls.map { it.id to it.area(screen) }
@@ -77,6 +81,12 @@ fun LayoutProfile.validate(screen: ScreenSize, otherNames: Set<String> = emptySe
 /** The button actions that turn gyro on. A layout may use only one of them. */
 val GYRO_SWITCHES: Set<ButtonAction> = setOf(ButtonAction.Gyro(GyroButton.TOGGLE), ButtonAction.Gyro(GyroButton.HOLD))
 
+/** The gyro switches a button or key may not take, given what the [others] already send. */
+fun blockedGyroSwitches(others: Iterable<ButtonAction>): Set<ButtonAction> {
+    val used = others.filterTo(HashSet()) { it in GYRO_SWITCHES }
+    return if (used.isEmpty()) emptySet() else GYRO_SWITCHES - used
+}
+
 private fun GyroBinding.isValid(): Boolean {
     if (range !in GyroBinding.MIN_RANGE..GyroBinding.MAX_RANGE) return false
     return this !is GyroBinding.StickBinding || horizontal || vertical
@@ -93,6 +103,10 @@ fun LayoutProfile.screenIssues(screen: ScreenSize): List<LayoutIssue> =
 /** Issues the gyro panel fixes, rather than a control or the name. */
 val LayoutIssue.isGyro: Boolean
     get() = this is LayoutIssue.DuplicateGyroTarget || this is LayoutIssue.InvalidGyroBinding || this == LayoutIssue.InvalidGyroDeadzone
+
+/** Issues the volume keys panel fixes. */
+val LayoutIssue.isVolumeKeys: Boolean
+    get() = this is LayoutIssue.ConflictingGyroButtons && keys.isNotEmpty()
 
 /** The ids of every control an issue names, for highlighting. */
 fun List<LayoutIssue>.controlIds(): Set<String> = flatMapTo(HashSet()) { issue ->

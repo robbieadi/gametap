@@ -17,6 +17,7 @@ import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.Position
 import io.github.robbieadi.gametap.layout.Shape
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKeys
 import io.github.robbieadi.gametap.platform.MotionSample
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -209,5 +210,14 @@ class GyroControllerTest {
         assertEquals(true, gyro.toggledOn.value)
         tap(GyroButton.TOGGLE)
         assertEquals(false, gyro.toggledOn.value)
+    }
+
+    @Test
+    fun holdOnAVolumeKeyAlsoStartsGyroOff() {
+        gyro.setLayout(profile().copy(volumeKeys = VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD))))
+        gyro.start()
+        sample(0f)
+        sample(20f)
+        assertEquals(0f, rt, 0.001f)
     }
 }

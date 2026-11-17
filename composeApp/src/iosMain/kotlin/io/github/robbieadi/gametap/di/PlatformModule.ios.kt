@@ -18,8 +18,10 @@ import io.github.robbieadi.gametap.platform.IosHogpTransport
 import io.github.robbieadi.gametap.platform.IosMotionSensor
 import io.github.robbieadi.gametap.platform.IosScreenControl
 import io.github.robbieadi.gametap.platform.MotionSensor
+import io.github.robbieadi.gametap.platform.NoVolumeKeyInput
 import io.github.robbieadi.gametap.platform.SETTINGS_FILE_NAME
 import io.github.robbieadi.gametap.platform.ScreenControl
+import io.github.robbieadi.gametap.platform.VolumeKeyInput
 import kotlinx.cinterop.ExperimentalForeignApi
 import okio.FileSystem
 import okio.Path
@@ -37,6 +39,7 @@ actual fun platformModule(): Module =
         single<Haptics> { IosHaptics() }
         single<ScreenControl> { IosScreenControl() }
         single<MotionSensor> { IosMotionSensor() }
+        single<VolumeKeyInput> { NoVolumeKeyInput }
         single<DataStore<Preferences>> {
             PreferenceDataStoreFactory.createWithPath { documentsFile(SETTINGS_FILE_NAME) }
         }

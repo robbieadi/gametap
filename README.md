@@ -14,6 +14,7 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 | Android app with a Linux host | Used on a Redmi Pad SE; every control tested one at a time |
 | Multi-touch | Unit tested in the tracker; used in a game on the Redmi Pad SE, not checked control by control |
 | Leaving the app and coming back | Tested on the Redmi Pad SE, see [Using it](#using-it) |
+| Volume keys | Used on a Redmi Pad SE; about 150 ms slower than on-screen buttons, see [Volume keys](#volume-keys) |
 | Gyro | Tilt math and controls unit tested. iOS reader checked against CoreMotion's gravity on an iPhone 13 mini; **tilting not yet tried on a device** on either platform |
 | Windows and macOS hosts | **Not yet tested** |
 | iOS code | Compiles against the iOS SDK bindings; **never linked or run** |
@@ -78,6 +79,27 @@ the input keeps changing, so reports go out at the 8 ms cap instead of the 16 ms
 
 On iOS the sensor is CoreMotion's device motion, also gyroscope and accelerometer without the
 compass, at 100 Hz. Every device iOS 16 runs on has a gyroscope, so there is no fallback.
+
+### Volume keys
+
+Tap **Keys** in the layout editor to bind the volume keys. Each key can send any action a button
+can, including the gyro ones, and sends it while held. A bound key no longer changes the volume
+while the gamepad is on screen; an unbound key still does, and both keys change the volume again
+while the menu is open. Volume keys have no on-screen control, so no button lights up and there is
+no haptic tick.
+
+Volume keys are slower than on-screen buttons. Android holds each press back about 150 ms, on
+both keys, to check for shortcuts such as volume down + power, and no app setting turns that off.
+Measured on a Redmi Pad SE from 50 presses (`adb logcat -s GametapKeys` logs each one): a held
+press reached the app after 153 to 155 ms, the release after 3 to 6 ms. A tap released before
+that wait ends arrives as a press and release a few milliseconds apart, so every press is held
+for at least 40 ms to make sure the host sees it. Use the keys for actions where timing matters
+less, such as gyro hold or recenter. An accessibility service would get the keys before the
+wait; it is not built.
+
+Android only. iOS has no public API for the volume keys: the usual workaround watches the system
+volume, which cannot tell a hold from a press and still changes the volume. The editor hides
+**Keys** on iOS.
 
 To check the result on a host, use Windows `joy.cpl`, <https://hardwaretester.com/gamepad>,
 Steam controller settings, or `evtest` / `jstest` on Linux.

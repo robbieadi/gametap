@@ -15,12 +15,14 @@ import io.github.robbieadi.gametap.platform.AndroidHaptics
 import io.github.robbieadi.gametap.platform.AndroidHidTransport
 import io.github.robbieadi.gametap.platform.AndroidMotionSensor
 import io.github.robbieadi.gametap.platform.AndroidScreenControl
+import io.github.robbieadi.gametap.platform.AndroidVolumeKeyInput
 import io.github.robbieadi.gametap.platform.BluetoothAccess
 import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.HidTransport
 import io.github.robbieadi.gametap.platform.MotionSensor
 import io.github.robbieadi.gametap.platform.SETTINGS_FILE_NAME
 import io.github.robbieadi.gametap.platform.ScreenControl
+import io.github.robbieadi.gametap.platform.VolumeKeyInput
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 import org.koin.core.module.Module
@@ -34,6 +36,7 @@ actual fun platformModule(): Module = module {
     single<Haptics> { AndroidHaptics(get()) }
     single<ScreenControl> { AndroidScreenControl(get()) }
     single<MotionSensor> { AndroidMotionSensor(get(), get()) }
+    single { AndroidVolumeKeyInput() } bind VolumeKeyInput::class
     single<DataStore<Preferences>> {
         val context = get<Context>()
         PreferenceDataStoreFactory.create { context.preferencesDataStoreFile(SETTINGS_FILE_NAME.removeSuffix(".preferences_pb")) }

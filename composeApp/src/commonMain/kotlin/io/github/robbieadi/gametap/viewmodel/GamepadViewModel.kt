@@ -7,13 +7,16 @@ import io.github.robbieadi.gametap.gyro.GyroController
 import io.github.robbieadi.gametap.input.GamepadTouchTracker
 import io.github.robbieadi.gametap.input.InputStateHolder
 import io.github.robbieadi.gametap.input.ReportSender
+import io.github.robbieadi.gametap.input.VolumeKeyPresses
 import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.LayoutRepository
 import io.github.robbieadi.gametap.layout.Layouts
+import io.github.robbieadi.gametap.layout.VolumeKey
 import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.MotionSensor
 import io.github.robbieadi.gametap.platform.ScreenModeLock
 import io.github.robbieadi.gametap.platform.SettingsRepository
+import io.github.robbieadi.gametap.platform.VolumeKeyInput
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -30,12 +33,14 @@ class GamepadViewModel(
     settingsRepository: SettingsRepository,
     private val layoutRepository: LayoutRepository,
     private val motionSensor: MotionSensor,
+    private val volumeKeyInput: VolumeKeyInput,
 ) : ViewModel() {
     private val settings: StateFlow<GamepadSettings> = settingsRepository.settings
 
     private val gyro = GyroController(input::setMotion)
     private var shown = false
     private var sensorRunning = false
+    private var menuOpen = false
 
     val tracker = GamepadTouchTracker(
         layout = layoutRepository.layouts.value.active,
@@ -45,13 +50,17 @@ class GamepadViewModel(
         onGyroButtons = gyro::setButtons,
     )
 
+    private val volumeKeys = VolumeKeyPresses(viewModelScope, tracker::key)
+
     /** The profile in use. The tracker switches over before the screen draws the new one. */
     val layout: StateFlow<LayoutProfile> = layoutRepository.layouts
         .map { it.active }
         .onEach {
+            volumeKeys.clear()
             tracker.setLayout(it)
             gyro.setLayout(it)
             updateSensor(it)
+            updateVolumeKeys(it)
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, layoutRepository.layouts.value.active)
 
@@ -85,7 +94,13 @@ class GamepadViewModel(
 
     /** Opening the menu lets go of every control, so nothing stays held behind it. */
     fun onMenuOpened() {
-        tracker.releaseAll()
+        releaseAll()
+    }
+
+    /** While the menu is open, the volume keys change the volume again. */
+    fun setMenuOpen(open: Boolean) {
+        menuOpen = open
+        updateVolumeKeys(layout.value)
     }
 
     fun onScreenShown() {
@@ -93,20 +108,41 @@ class GamepadViewModel(
         screenMode.acquire()
         shown = true
         updateSensor(layout.value)
+        updateVolumeKeys(layout.value)
     }
 
     /** Leaving the screen must never leave a button held on the host. */
     fun onScreenHidden() {
-        tracker.releaseAll()
+        releaseAll()
         sender.lowLatency = false
         screenMode.release()
         shown = false
         updateSensor(layout.value)
+        updateVolumeKeys(layout.value)
     }
 
     override fun onCleared() {
         shown = false
         updateSensor(layout.value)
+        updateVolumeKeys(layout.value)
+    }
+
+    /** The keys are taken only while the gamepad is on screen, unobstructed, and the profile binds one. */
+    private fun updateVolumeKeys(profile: LayoutProfile) {
+        val wanted = shown && !menuOpen && !profile.volumeKeys.isEmpty
+        volumeKeyInput.setHandler(if (wanted) ::onVolumeKey else null)
+    }
+
+    /** An unbound key goes on changing the volume. */
+    private fun onVolumeKey(key: VolumeKey, pressed: Boolean): Boolean {
+        if (layout.value.volumeKeys[key] == null) return false
+        if (pressed) volumeKeys.down(key) else volumeKeys.up(key)
+        return true
+    }
+
+    private fun releaseAll() {
+        volumeKeys.clear()
+        tracker.releaseAll()
     }
 
     /** The sensor runs only while the gamepad is on screen and the profile uses gyro. */

@@ -11,6 +11,7 @@ import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.Guide
 import io.github.robbieadi.gametap.layout.GyroAxis
 import io.github.robbieadi.gametap.layout.GyroBinding
+import io.github.robbieadi.gametap.layout.GyroButton
 import io.github.robbieadi.gametap.layout.GyroHorizontal
 import io.github.robbieadi.gametap.layout.GyroTarget
 import io.github.robbieadi.gametap.layout.LayoutEditor
@@ -21,6 +22,8 @@ import io.github.robbieadi.gametap.layout.Position
 import io.github.robbieadi.gametap.layout.ScreenSize
 import io.github.robbieadi.gametap.layout.Shape
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKey
+import io.github.robbieadi.gametap.layout.VolumeKeys
 import io.github.robbieadi.gametap.layout.centerX
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -290,5 +293,17 @@ class LayoutEditorTest {
         assertEquals(GyroHorizontal.YAW, editor.s.draft.gyro.horizontal)
         assertEquals(2.5f, editor.s.draft.gyro.deadzone)
         assertTrue(editor.s.issues.isEmpty())
+    }
+
+    @Test
+    fun volumeKeysAreBoundClearedAndUndone() {
+        val editor = editor(menu)
+        editor.setVolumeKey(VolumeKey.UP, ButtonAction.Pad(Button.RB))
+        editor.setVolumeKey(VolumeKey.DOWN, ButtonAction.Gyro(GyroButton.HOLD))
+        assertEquals(VolumeKeys(ButtonAction.Pad(Button.RB), ButtonAction.Gyro(GyroButton.HOLD)), editor.s.draft.volumeKeys)
+        editor.setVolumeKey(VolumeKey.UP, null)
+        assertEquals(VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD)), editor.s.draft.volumeKeys)
+        editor.undo()
+        assertEquals(ButtonAction.Pad(Button.RB), editor.s.draft.volumeKeys.up)
     }
 }

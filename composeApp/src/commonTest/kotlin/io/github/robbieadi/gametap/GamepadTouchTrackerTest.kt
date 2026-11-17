@@ -20,6 +20,8 @@ import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.Position
 import io.github.robbieadi.gametap.layout.Shape
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKey
+import io.github.robbieadi.gametap.layout.VolumeKeys
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -271,6 +273,65 @@ class GamepadTouchTrackerTest {
         assertEquals(1, presses)
 
         tracker.up(1)
+        assertEquals(emptySet(), gyroButtons)
+    }
+
+    private fun withKeys(keys: VolumeKeys) = tracker(layoutOf(a, menu).copy(volumeKeys = keys))
+
+    @Test
+    fun volumeKeySendsItsActionWhileHeld() {
+        val tracker = withKeys(VolumeKeys(up = ButtonAction.Pad(Button.B), down = ButtonAction.Trigger(Side.LEFT)))
+        tracker.key(VolumeKey.UP, pressed = true)
+        tracker.key(VolumeKey.DOWN, pressed = true)
+        assertTrue(state.isPressed(Button.B))
+        assertEquals(1f, state.leftTrigger)
+        // The key clicks by itself, and no control lights up.
+        assertEquals(0, presses)
+        assertEquals(emptySet(), view.pressed)
+        tracker.key(VolumeKey.UP, pressed = false)
+        assertFalse(state.isPressed(Button.B))
+        assertEquals(1f, state.leftTrigger)
+    }
+
+    @Test
+    fun volumeKeyCombinesWithTouches() {
+        val tracker = withKeys(VolumeKeys(up = ButtonAction.Pad(Button.A)))
+        tracker.key(VolumeKey.UP, pressed = true)
+        tracker.down(1, 800f, 250f)
+        tracker.up(1)
+        assertTrue(state.isPressed(Button.A))
+        tracker.key(VolumeKey.UP, pressed = false)
+        assertFalse(state.isPressed(Button.A))
+    }
+
+    @Test
+    fun unboundVolumeKeySendsNothing() {
+        val tracker = withKeys(VolumeKeys(up = ButtonAction.Pad(Button.A)))
+        tracker.key(VolumeKey.DOWN, pressed = true)
+        assertEquals(GamepadState(), state)
+    }
+
+    @Test
+    fun releaseAllAndNewLayoutLetGoOfVolumeKeys() {
+        val keys = VolumeKeys(up = ButtonAction.Pad(Button.A))
+        val tracker = withKeys(keys)
+        tracker.key(VolumeKey.UP, pressed = true)
+        tracker.releaseAll()
+        assertFalse(state.isPressed(Button.A))
+
+        tracker.key(VolumeKey.UP, pressed = true)
+        tracker.setLayout(layoutOf(b, menu).copy(volumeKeys = keys))
+        assertFalse(state.isPressed(Button.A))
+    }
+
+    @Test
+    fun volumeKeyCanHoldGyro() {
+        var gyroButtons: Set<GyroButton> = emptySet()
+        val layout = layoutOf(menu).copy(volumeKeys = VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD)))
+        val tracker = GamepadTouchTracker(layout, input, onGyroButtons = { gyroButtons = it }).apply { resize(1000f, 500f) }
+        tracker.key(VolumeKey.DOWN, pressed = true)
+        assertEquals(setOf(GyroButton.HOLD), gyroButtons)
+        tracker.key(VolumeKey.DOWN, pressed = false)
         assertEquals(emptySet(), gyroButtons)
     }
 }

@@ -19,7 +19,10 @@ import io.github.robbieadi.gametap.layout.Position
 import io.github.robbieadi.gametap.layout.ScreenSize
 import io.github.robbieadi.gametap.layout.Shape
 import io.github.robbieadi.gametap.layout.Side
+import io.github.robbieadi.gametap.layout.VolumeKey
+import io.github.robbieadi.gametap.layout.VolumeKeys
 import io.github.robbieadi.gametap.layout.controlIds
+import io.github.robbieadi.gametap.layout.isVolumeKeys
 import io.github.robbieadi.gametap.layout.screenIssues
 import io.github.robbieadi.gametap.layout.validate
 import kotlin.test.Test
@@ -234,5 +237,23 @@ class LayoutValidationTest {
             emptyList(),
             profile(gyroButton("t1", GyroButton.TOGGLE, 0.2f), gyroButton("t2", GyroButton.TOGGLE, 0.5f)).validate(screen),
         )
+    }
+
+    @Test
+    fun gyroSwitchOnAVolumeKeyConflictsWithTheOtherOnAButton() {
+        val issues = profile(gyroButton("t", GyroButton.TOGGLE, 0.2f))
+            .copy(volumeKeys = VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD)))
+            .validate(screen)
+        assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(listOf("t"), listOf(VolumeKey.DOWN))), issues)
+        assertTrue(issues.single().isVolumeKeys)
+    }
+
+    @Test
+    fun gyroSwitchesOnBothVolumeKeysConflict() {
+        val issues = profile()
+            .copy(volumeKeys = VolumeKeys(up = ButtonAction.Gyro(GyroButton.TOGGLE), down = ButtonAction.Gyro(GyroButton.HOLD)))
+            .validate(screen)
+        assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(emptyList(), VolumeKey.entries)), issues)
+        assertEquals(emptySet(), issues.controlIds())
     }
 }
