@@ -14,7 +14,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,7 +29,6 @@ import io.github.robbieadi.gametap.viewmodel.ConnectionViewModel
 fun ConnectScreen(
     viewModel: ConnectionViewModel,
     onOpenGamepad: () -> Unit,
-    onOpenSettings: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val permissionDenied by viewModel.permissionDenied.collectAsState()
@@ -72,9 +70,6 @@ fun ConnectScreen(
             }
             OutlinedButton(onClick = onOpenGamepad, modifier = Modifier.fillMaxWidth()) {
                 Text("Open gamepad")
-            }
-            TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("Settings")
             }
         }
     }

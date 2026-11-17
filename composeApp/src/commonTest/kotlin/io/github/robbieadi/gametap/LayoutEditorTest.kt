@@ -306,4 +306,59 @@ class LayoutEditorTest {
         editor.undo()
         assertEquals(ButtonAction.Pad(Button.RB), editor.s.draft.volumeKeys.up)
     }
+
+    @Test
+    fun stickTuningIsSetPerStickAndClamped() {
+        val left = StickControl("l", at(300f, 250f), Side.LEFT, radius = 0.17f, grabRadius = 0.2f)
+        val right = StickControl("r", at(700f, 250f), Side.RIGHT, radius = 0.17f, grabRadius = 0.2f)
+        val editor = editor(menu, left, right)
+        editor.tap(300f, 250f)
+        editor.setStickDeadzone(0.2f)
+        editor.setStickCurve(2f)
+        editor.setStickFloating(true)
+
+        val tuned = editor.control("l") as StickControl
+        assertEquals(0.2f, tuned.deadzone)
+        assertEquals(2f, tuned.curveExponent)
+        assertTrue(tuned.floating)
+        assertEquals(right, editor.control("r"), "the other stick keeps its own settings")
+
+        editor.setStickDeadzone(0.9f)
+        editor.setStickCurve(10f)
+        val clamped = editor.control("l") as StickControl
+        assertEquals(StickControl.MAX_DEADZONE, clamped.deadzone)
+        assertEquals(StickControl.MAX_CURVE, clamped.curveExponent)
+        assertTrue(editor.s.issues.isEmpty())
+    }
+
+    @Test
+    fun consecutiveDeadzoneStepsShareOneUndoStep() {
+        val stick = StickControl("s", at(500f, 250f), Side.LEFT, radius = 0.17f, grabRadius = 0.2f)
+        val editor = editor(menu, stick)
+        editor.tap(500f, 250f)
+        editor.setStickDeadzone(0.1f)
+        editor.setStickDeadzone(0.12f)
+        editor.undo()
+        assertEquals(StickControl.DEFAULT_DEADZONE, (editor.control("s") as StickControl).deadzone)
+    }
+
+    @Test
+    fun stickTuningLeavesOtherControlsAlone() {
+        val editor = editor(menu, a)
+        editor.tap(500f, 250f)
+        editor.setStickDeadzone(0.2f)
+        editor.setStickFloating(true)
+        assertEquals(a, editor.control("a"))
+        assertEquals(false, editor.s.canUndo)
+    }
+
+    @Test
+    fun hapticsIsSetForTheLayoutAndUndone() {
+        val editor = editor(menu)
+        assertTrue(editor.s.draft.haptics)
+        editor.setHaptics(false)
+        assertEquals(false, editor.s.draft.haptics)
+        editor.undo()
+        assertTrue(editor.s.draft.haptics)
+    }
 }

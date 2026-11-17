@@ -62,7 +62,6 @@ data class TouchView(
 class GamepadTouchTracker(
     layout: LayoutProfile,
     private val input: InputStateHolder,
-    private val floatingSticks: () -> Boolean = { false },
     private val onPress: () -> Unit = {},
     /** The gyro buttons under a finger, after every change. */
     private val onGyroButtons: (Set<GyroButton>) -> Unit = {},
@@ -105,7 +104,7 @@ class GamepadTouchTracker(
         val hit = topmostAt(x, y)
         val captured = hit?.takeIf { it.captures() && pointers.values.none { p -> p.captured === it } }
         val origin = (captured?.control as? StickControl)?.let {
-            if (floatingSticks()) TouchPoint(x, y) else centerOf(captured)
+            if (it.floating) TouchPoint(x, y) else centerOf(captured)
         }
         pointers[id] = Pointer(x, y, captured, origin)
         publish()

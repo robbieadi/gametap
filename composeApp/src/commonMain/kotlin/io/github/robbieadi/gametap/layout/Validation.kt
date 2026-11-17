@@ -23,6 +23,9 @@ sealed interface LayoutIssue {
 
     data object InvalidGyroDeadzone : LayoutIssue
 
+    /** A stick's deadzone or curve is outside what the editor offers, as in an edited file. */
+    data class InvalidStickTuning(val id: String) : LayoutIssue
+
     /**
      * Both a Gyro on/off and a Gyro on while held, on buttons ([ids]) or volume keys ([keys]); a
      * layout uses one way or the other.
@@ -59,6 +62,9 @@ fun LayoutProfile.validate(screen: ScreenSize, otherNames: Set<String> = emptySe
             .mapTo(LinkedHashSet()) { it.target }
             .forEach { add(LayoutIssue.InvalidGyroBinding(it)) }
         if (gyro.deadzone !in 0f..GyroSetup.MAX_DEADZONE) add(LayoutIssue.InvalidGyroDeadzone)
+        controls.filterIsInstance<GamepadControl.StickControl>()
+            .filterNot { it.tuningIsValid }
+            .forEach { add(LayoutIssue.InvalidStickTuning(it.id)) }
         if (buttonActions.filterTo(HashSet()) { it in GYRO_SWITCHES }.size > 1) {
             val ids = controls.filter { (it as? GamepadControl.ButtonControl)?.action in GYRO_SWITCHES }.map { it.id }
             val keys = VolumeKey.entries.filter { volumeKeys[it] in GYRO_SWITCHES }
@@ -116,6 +122,7 @@ fun List<LayoutIssue>.controlIds(): Set<String> = flatMapTo(HashSet()) { issue -
         is LayoutIssue.DuplicateStick -> issue.ids
         is LayoutIssue.DuplicateId -> listOf(issue.id)
         is LayoutIssue.ConflictingGyroButtons -> issue.ids
+        is LayoutIssue.InvalidStickTuning -> listOf(issue.id)
         is LayoutIssue.MenuCount, LayoutIssue.BlankName, LayoutIssue.DuplicateName,
         is LayoutIssue.DuplicateGyroTarget, is LayoutIssue.InvalidGyroBinding, LayoutIssue.InvalidGyroDeadzone,
         -> emptyList()

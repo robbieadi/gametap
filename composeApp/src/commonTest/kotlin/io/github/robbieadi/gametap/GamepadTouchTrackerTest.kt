@@ -47,14 +47,13 @@ class GamepadTouchTrackerTest {
     private fun layoutOf(vararg controls: GamepadControl) = LayoutProfile("test", "Test", controls.toList())
 
     private val input = InputStateHolder()
-    private var floating = false
     private var presses = 0
     private val tracker = tracker(layoutOf(a, b, stick, throttle, dpad, menu))
     private val state get() = input.state.value
     private val view get() = tracker.view.value
 
     private fun tracker(layout: LayoutProfile) =
-        GamepadTouchTracker(layout, input, { floating }, { presses++ }).apply { resize(1000f, 500f) }
+        GamepadTouchTracker(layout, input, { presses++ }).apply { resize(1000f, 500f) }
 
     @Test
     fun buttonPressAndRelease() {
@@ -125,7 +124,7 @@ class GamepadTouchTrackerTest {
 
     @Test
     fun floatingStickAnchorsAtTouchDown() {
-        floating = true
+        tracker.setLayout(layoutOf(a, b, stick.copy(floating = true), throttle, dpad, menu))
         tracker.down(1, 250f, 300f)
         assertEquals(0f, state.leftStick.x)
         assertEquals(TouchPoint(250f, 300f), view.sticks.getValue("ls").origin)
@@ -264,7 +263,7 @@ class GamepadTouchTrackerTest {
     fun gyroButtonsAreReportedAndSendNothing() {
         val hold = button("gyro", 800f, 250f, ButtonAction.Gyro(GyroButton.HOLD))
         var gyroButtons: Set<GyroButton> = emptySet()
-        val tracker = GamepadTouchTracker(layoutOf(hold, menu), input, { false }, { presses++ }, { gyroButtons = it })
+        val tracker = GamepadTouchTracker(layoutOf(hold, menu), input, { presses++ }, { gyroButtons = it })
             .apply { resize(1000f, 500f) }
 
         tracker.down(1, 800f, 250f)
@@ -333,5 +332,15 @@ class GamepadTouchTrackerTest {
         assertEquals(setOf(GyroButton.HOLD), gyroButtons)
         tracker.key(VolumeKey.DOWN, pressed = false)
         assertEquals(emptySet(), gyroButtons)
+    }
+
+    @Test
+    fun onlyTheFloatingStickAnchorsAtTouchDown() {
+        val right = StickControl("rs", at(800f, 400f), Side.RIGHT, 0.2f, 0.18f) // grab r90
+        tracker.setLayout(layoutOf(stick.copy(floating = true), right, menu))
+        tracker.down(1, 250f, 300f)
+        tracker.down(2, 820f, 400f)
+        assertEquals(TouchPoint(250f, 300f), view.sticks.getValue("ls").origin)
+        assertEquals(TouchPoint(800f, 400f), view.sticks.getValue("rs").origin, "a fixed stick keeps its center")
     }
 }

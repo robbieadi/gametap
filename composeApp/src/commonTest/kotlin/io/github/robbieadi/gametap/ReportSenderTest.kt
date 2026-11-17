@@ -4,7 +4,8 @@ package io.github.robbieadi.gametap
 
 import app.cash.turbine.test
 import io.github.robbieadi.gametap.domain.Button
-import io.github.robbieadi.gametap.domain.GamepadSettings
+import io.github.robbieadi.gametap.domain.DeadzoneCurve
+import io.github.robbieadi.gametap.layout.Side
 import io.github.robbieadi.gametap.domain.GamepadState
 import io.github.robbieadi.gametap.domain.Stick
 import io.github.robbieadi.gametap.gyro.GyroOutput
@@ -73,12 +74,12 @@ private class FakeTransport(initial: TransportState = TransportState.Connected("
 
 class ReportSenderTest {
     private val input = InputStateHolder()
-    private val settings = MutableStateFlow(GamepadSettings(deadzone = 0f))
+    private var curves = mapOf(Side.LEFT to DeadzoneCurve(deadzone = 0f), Side.RIGHT to DeadzoneCurve(deadzone = 0f))
 
     private fun TestScope.startSender(transport: FakeTransport, lowLatency: Boolean = false): ReportSender {
         val clock = FakeClock(testScheduler)
         transport.clock = clock
-        val sender = ReportSender(input, transport, settings, timeSource = clock)
+        val sender = ReportSender(input, transport, stickCurve = { curves.getValue(it) }, timeSource = clock)
         sender.lowLatency = lowLatency
         backgroundScope.launch { sender.run() }
         runCurrent()
@@ -207,7 +208,7 @@ class ReportSenderTest {
 
     @Test
     fun stickCurveIsAppliedToSentReports() = runTest {
-        settings.value = GamepadSettings(deadzone = 0.5f)
+        curves = curves + (Side.LEFT to DeadzoneCurve(deadzone = 0.5f))
         input.set(GamepadState(leftStick = Stick(x = 0.4f)))
         val transport = FakeTransport()
         transport.sent.test {
@@ -243,5 +244,18 @@ class ReportSenderTest {
         input.setMotion(GyroOutput(rightStick = Stick(x = 0.5f)))
         runCurrent()
         assertEquals(before + 1, transport.attempts)
+    }
+
+    @Test
+    fun eachStickUsesItsOwnCurve() = runTest {
+        curves = mapOf(Side.LEFT to DeadzoneCurve(deadzone = 0.5f), Side.RIGHT to DeadzoneCurve(deadzone = 0f))
+        input.set(GamepadState(leftStick = Stick(x = 0.4f), rightStick = Stick(x = 0.4f)))
+        val transport = FakeTransport()
+        transport.sent.test {
+            startSender(transport)
+            val report = awaitItem()
+            assertEquals(128, report[3].toInt() and 0xFF, "inside the left stick's deadzone")
+            assertTrue((report[5].toInt() and 0xFF) > 128, "the right stick has none")
+        }
     }
 }

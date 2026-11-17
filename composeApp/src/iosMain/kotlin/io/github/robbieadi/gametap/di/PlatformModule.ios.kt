@@ -3,8 +3,6 @@
 package io.github.robbieadi.gametap.di
 
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import androidx.datastore.preferences.core.Preferences
 import io.github.robbieadi.gametap.layout.LAYOUT_FILE_NAME
 import io.github.robbieadi.gametap.layout.LayoutStore
 import io.github.robbieadi.gametap.layout.LayoutStoreQualifier
@@ -19,7 +17,6 @@ import io.github.robbieadi.gametap.platform.IosMotionSensor
 import io.github.robbieadi.gametap.platform.IosScreenControl
 import io.github.robbieadi.gametap.platform.MotionSensor
 import io.github.robbieadi.gametap.platform.NoVolumeKeyInput
-import io.github.robbieadi.gametap.platform.SETTINGS_FILE_NAME
 import io.github.robbieadi.gametap.platform.ScreenControl
 import io.github.robbieadi.gametap.platform.VolumeKeyInput
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -40,9 +37,6 @@ actual fun platformModule(): Module =
         single<ScreenControl> { IosScreenControl() }
         single<MotionSensor> { IosMotionSensor() }
         single<VolumeKeyInput> { NoVolumeKeyInput }
-        single<DataStore<Preferences>> {
-            PreferenceDataStoreFactory.createWithPath { documentsFile(SETTINGS_FILE_NAME) }
-        }
         single<DataStore<LayoutStore>>(LayoutStoreQualifier) {
             layoutDataStore(FileSystem.SYSTEM) { documentsFile(LAYOUT_FILE_NAME) }
         }

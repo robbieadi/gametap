@@ -52,7 +52,6 @@ private const val MENU_HOLD_MS = 700L
 fun GamepadScreen(
     viewModel: GamepadViewModel,
     transportState: StateFlow<TransportState>,
-    onOpenSettings: () -> Unit,
     /** Opens the editor on the profile with this id. */
     onEditLayout: (String) -> Unit,
     /** Back to the start screen. [disconnect] also stops the gamepad. */
@@ -170,10 +169,6 @@ fun GamepadScreen(
                     onEditLayout(layout.id)
                 },
                 onResume = { menuOpen = false },
-                onOpenSettings = {
-                    menuOpen = false
-                    onOpenSettings()
-                },
                 onLeave = {
                     menuOpen = false
                     onLeave(transport is TransportState.Connected || transport == TransportState.Advertising)

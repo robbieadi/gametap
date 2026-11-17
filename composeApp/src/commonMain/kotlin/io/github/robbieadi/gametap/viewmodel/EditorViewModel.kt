@@ -7,6 +7,7 @@ import io.github.robbieadi.gametap.layout.LayoutEditor
 import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.LayoutRepository
 import io.github.robbieadi.gametap.layout.ScreenSize
+import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.MotionSensor
 import io.github.robbieadi.gametap.platform.ScreenModeLock
 import io.github.robbieadi.gametap.platform.VolumeKeyInput
@@ -23,9 +24,13 @@ class EditorViewModel(
     private val screenMode: ScreenModeLock,
     motionSensor: MotionSensor,
     volumeKeyInput: VolumeKeyInput,
+    haptics: Haptics,
 ) : ViewModel() {
     /** False where the keys cannot be captured, which hides them from the editor. */
     val volumeKeysAvailable: Boolean = volumeKeyInput.isAvailable
+
+    /** The haptics switch is hidden on devices that cannot vibrate. */
+    val hapticsAvailable: Boolean = haptics.isAvailable
 
     /** False on devices without a motion sensor; gyro bindings can still be edited for other phones. */
     val gyroAvailable: Boolean = motionSensor.isAvailable

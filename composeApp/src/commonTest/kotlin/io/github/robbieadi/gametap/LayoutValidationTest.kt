@@ -256,4 +256,17 @@ class LayoutValidationTest {
         assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(emptyList(), VolumeKey.entries)), issues)
         assertEquals(emptySet(), issues.controlIds())
     }
+
+    @Test
+    fun stickTuningOutsideTheEditorRangesIsFlagged() {
+        val stick = StickControl("s", Position(Anchor.LEFT, 0.4f, 0.5f), Side.LEFT, 0.15f, 0.2f)
+        assertEquals(emptyList(), profile(stick).validate(screen))
+        assertEquals(
+            listOf(LayoutIssue.InvalidStickTuning("s")),
+            profile(stick.copy(deadzone = 0.5f)).validate(screen),
+        )
+        val badCurve = profile(stick.copy(curveExponent = 0.5f)).validate(screen)
+        assertEquals(listOf(LayoutIssue.InvalidStickTuning("s")), badCurve)
+        assertEquals(setOf("s"), badCurve.controlIds())
+    }
 }

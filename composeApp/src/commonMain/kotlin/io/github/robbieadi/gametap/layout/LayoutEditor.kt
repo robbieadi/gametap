@@ -227,6 +227,30 @@ class LayoutEditor(
 
     fun rename(name: String) = edit(key = "name") { it.copy(name = name) }
 
+    // ---------- Stick tuning ----------
+
+    /** Consecutive steps share one undo step per stick. */
+    fun setStickDeadzone(deadzone: Float) = editSelected(key = "deadzone:${mutableState.value.selectedId}") { control ->
+        if (control is StickControl) control.copy(deadzone = deadzone.coerceIn(0f, StickControl.MAX_DEADZONE)) else control
+    }
+
+    /** Consecutive steps share one undo step per stick. */
+    fun setStickCurve(exponent: Float) = editSelected(key = "curve:${mutableState.value.selectedId}") { control ->
+        if (control is StickControl) {
+            control.copy(curveExponent = exponent.coerceIn(StickControl.MIN_CURVE, StickControl.MAX_CURVE))
+        } else {
+            control
+        }
+    }
+
+    fun setStickFloating(floating: Boolean) = editSelected { control ->
+        if (control is StickControl) control.copy(floating = floating) else control
+    }
+
+    // ---------- Haptics ----------
+
+    fun setHaptics(enabled: Boolean) = edit { it.copy(haptics = enabled) }
+
     // ---------- Gyro ----------
 
     fun setGyroHorizontal(horizontal: GyroHorizontal) = editGyro { it.copy(horizontal = horizontal) }

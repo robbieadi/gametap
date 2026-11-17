@@ -102,7 +102,7 @@ import kotlin.math.roundToInt
 private val TOOLBAR_BAND = 72.dp
 
 /** The profile-wide settings panels, shown when no control is selected. */
-private enum class Panel { GYRO, VOLUME_KEYS }
+private enum class Panel { GYRO, VOLUME_KEYS, HAPTICS }
 
 @Composable
 fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
@@ -200,6 +200,8 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
                 // Hidden where the keys cannot be captured. Layouts stay on the device they were
                 // made on, so none there can have keys bound.
                 onVolumeKeys = if (viewModel.volumeKeysAvailable) ({ toggle(Panel.VOLUME_KEYS) }) else null,
+                // Hidden where the phone cannot vibrate; the setting stays with the layout for other phones.
+                onHaptics = if (viewModel.hapticsAvailable) ({ toggle(Panel.HAPTICS) }) else null,
                 onSave = { scope.launch { if (viewModel.save()) onClose() } },
                 modifier = Modifier.align(if (atBottom) Alignment.BottomCenter else Alignment.TopCenter),
             )
@@ -220,6 +222,17 @@ fun EditorScreen(viewModel: EditorViewModel, onClose: () -> Unit) {
             if (panel == Panel.VOLUME_KEYS && state.selected == null) {
                 VolumeKeysPanel(
                     draft = state.draft,
+                    editor = editor,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(8.dp)
+                        .width(280.dp)
+                        .heightIn(max = maxHeight - 16.dp),
+                )
+            }
+            if (panel == Panel.HAPTICS && state.selected == null) {
+                HapticsPanel(
+                    enabled = state.draft.haptics,
                     editor = editor,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
@@ -322,6 +335,7 @@ private fun Toolbar(
     onFlip: () -> Unit,
     onGyro: () -> Unit,
     onVolumeKeys: (() -> Unit)?,
+    onHaptics: (() -> Unit)?,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -378,6 +392,7 @@ private fun Toolbar(
         }
         TextButton(onClick = onGyro) { Text("Gyro") }
         if (onVolumeKeys != null) TextButton(onClick = onVolumeKeys) { Text("Keys") }
+        if (onHaptics != null) TextButton(onClick = onHaptics) { Text("Haptics") }
         TextButton(onClick = onFlip) { Text("⇅") }
         Button(onClick = onSave, enabled = state.issues.isEmpty(), modifier = Modifier.padding(start = 4.dp)) {
             Text("Save")
@@ -429,11 +444,14 @@ private fun ControlPanel(control: GamepadControl, state: EditorState, editor: La
             }
         }
         when (control) {
-            is GamepadControl.StickControl -> Field("Stick") {
-                val taken = state.stickSides - control.side
-                Segmented(listOf("Left", "Right"), control.side.ordinal, enabled = { Side.entries[it] !in taken }) {
-                    editor.setSide(Side.entries[it])
+            is GamepadControl.StickControl -> {
+                Field("Stick") {
+                    val taken = state.stickSides - control.side
+                    Segmented(listOf("Left", "Right"), control.side.ordinal, enabled = { Side.entries[it] !in taken }) {
+                        editor.setSide(Side.entries[it])
+                    }
                 }
+                StickTuning(control, editor)
             }
             is GamepadControl.ThrottleControl -> Field("Trigger") {
                 Segmented(listOf("LT", "RT"), control.side.ordinal) { editor.setSide(Side.entries[it]) }
@@ -730,14 +748,20 @@ private fun RangeStepper(target: GyroTarget, range: Float, editor: LayoutEditor)
  * Steps land on multiples of [step], so an odd stored value rounds to the grid on the first tap.
  */
 @Composable
-private fun Stepper(value: Float, step: Float, bounds: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
+private fun Stepper(
+    value: Float,
+    step: Float,
+    bounds: ClosedFloatingPointRange<Float>,
+    format: (Float) -> String = ::degrees,
+    onChange: (Float) -> Unit,
+) {
     val down = (ceil(value / step - 0.001f) - 1) * step
     val up = (floor(value / step + 0.001f) + 1) * step
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { onChange(down.coerceIn(bounds)) }, enabled = value > bounds.start, modifier = Modifier.weight(1f)) {
             Text("−")
         }
-        Text(degrees(value), color = GamepadColors.Label, textAlign = TextAlign.Center, modifier = Modifier.width(64.dp))
+        Text(format(value), color = GamepadColors.Label, textAlign = TextAlign.Center, modifier = Modifier.width(64.dp))
         OutlinedButton(onClick = { onChange(up.coerceIn(bounds)) }, enabled = value < bounds.endInclusive, modifier = Modifier.weight(1f)) {
             Text("+")
         }
@@ -745,3 +769,57 @@ private fun Stepper(value: Float, step: Float, bounds: ClosedFloatingPointRange<
 }
 
 private fun degrees(value: Float): String = "${(value * 10).roundToInt() / 10f}°"
+
+private fun percent(value: Float): String = "${(value * 100).roundToInt()}%"
+
+private fun curve(value: Float): String =
+    if (value <= GamepadControl.StickControl.MIN_CURVE + 0.001f) "Linear" else "${(value * 100).roundToInt() / 100f}"
+
+/** How one stick turns thumb travel into output. Steppers, not sliders, as in the other panels. */
+@Composable
+private fun StickTuning(stick: GamepadControl.StickControl, editor: LayoutEditor) {
+    Field("Deadzone") {
+        Stepper(stick.deadzone, step = 0.02f, bounds = 0f..GamepadControl.StickControl.MAX_DEADZONE, format = ::percent, onChange = editor::setStickDeadzone)
+    }
+    Field("Sensitivity curve") {
+        Stepper(
+            stick.curveExponent,
+            step = 0.25f,
+            bounds = GamepadControl.StickControl.MIN_CURVE..GamepadControl.StickControl.MAX_CURVE,
+            format = ::curve,
+            onChange = editor::setStickCurve,
+        )
+    }
+    Text(
+        "Higher curves give finer control near the center.",
+        style = MaterialTheme.typography.bodySmall,
+        color = GamepadColors.Label.copy(alpha = 0.7f),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Floating", color = GamepadColors.Label, modifier = Modifier.weight(1f))
+        Switch(checked = stick.floating, onCheckedChange = editor::setStickFloating)
+    }
+    Text(
+        "A floating stick centers where your thumb lands instead of at its drawn position.",
+        style = MaterialTheme.typography.bodySmall,
+        color = GamepadColors.Label.copy(alpha = 0.7f),
+    )
+}
+
+/** Vibration on press, for the whole profile. */
+@Composable
+private fun HapticsPanel(enabled: Boolean, editor: LayoutEditor, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .consumeTouchDowns()
+            .background(GamepadColors.Surface, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Haptics", style = MaterialTheme.typography.titleSmall, color = GamepadColors.Label)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Vibrate on press", color = GamepadColors.Label, modifier = Modifier.weight(1f))
+            Switch(checked = enabled, onCheckedChange = editor::setHaptics)
+        }
+    }
+}

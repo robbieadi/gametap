@@ -1,5 +1,6 @@
 package io.github.robbieadi.gametap
 
+import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import androidx.datastore.core.CorruptionException
 import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.Anchor
@@ -119,5 +120,37 @@ class LayoutFileTest {
             """.trimIndent(),
         )
         assertEquals(VolumeKeys(), store.profiles.single().volumeKeys)
+    }
+
+    @Test
+    fun stickTuningAndHapticsReadBack() = runTest {
+        val stick = StickControl(
+            "ls", Position(Anchor.LEFT, 0.4f, 0.5f), Side.LEFT, 0.15f, 0.2f,
+            deadzone = 0.2f, curveExponent = 2.5f, floating = true,
+        )
+        val store = LayoutStore(activeProfileId = racing.id, profiles = listOf(racing.copy(controls = listOf(menu, stick), haptics = false)))
+        val buffer = Buffer()
+        LayoutStoreSerializer.writeTo(store, buffer)
+        assertEquals(store, LayoutStoreSerializer.readFrom(buffer))
+    }
+
+    /** Written before sticks and haptics were set per layout. */
+    @Test
+    fun stickWithoutTuningReadsDefaults() = runTest {
+        val store = read(
+            """
+            {"version":1,"activeProfileId":"racing","profiles":[
+              {"id":"racing","name":"Racing","controls":[
+                {"type":"stick","id":"ls","position":{"anchor":"left","x":0.4,"y":0.5},
+                 "side":"left","radius":0.15,"grabRadius":0.2}]}
+            ]}
+            """.trimIndent(),
+        )
+        val profile = store.profiles.single()
+        val stick = profile.controls.single() as StickControl
+        assertEquals(StickControl.DEFAULT_DEADZONE, stick.deadzone)
+        assertEquals(1f, stick.curveExponent)
+        assertEquals(false, stick.floating)
+        assertEquals(true, profile.haptics)
     }
 }

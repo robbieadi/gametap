@@ -58,7 +58,16 @@ under a second, unless you pressed **Stop**. Any control held when you leave is 
 On iOS the gamepad keeps running in the background. If you close Gametap from the app switcher
 or restart the phone, a Linux host may stop reconnecting, see [Linux hosts](#linux-hosts).
 
-Hold the three dots in the top-left corner of the gamepad to open settings.
+Hold the ☰ button on the gamepad to open the menu, where you switch layouts, edit the current one
+or exit.
+
+### Sticks and haptics
+
+Each stick has its own settings, saved with the layout. Select a stick in the layout editor to set
+its **deadzone** (0 to 40% of its travel sends nothing), its **sensitivity curve** (linear, or up
+to 3 for finer control near the center) and whether it is **floating**, centered where the thumb
+lands instead of at its drawn position. Tap **Haptics** in the editor to turn the vibration on
+press on or off for the layout; the button is hidden on devices that cannot vibrate.
 
 ### Gyro
 

@@ -2,7 +2,6 @@ package io.github.robbieadi.gametap.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import io.github.robbieadi.gametap.domain.GamepadSettings
 import io.github.robbieadi.gametap.gyro.GyroController
 import io.github.robbieadi.gametap.input.GamepadTouchTracker
 import io.github.robbieadi.gametap.input.InputStateHolder
@@ -15,7 +14,6 @@ import io.github.robbieadi.gametap.layout.VolumeKey
 import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.MotionSensor
 import io.github.robbieadi.gametap.platform.ScreenModeLock
-import io.github.robbieadi.gametap.platform.SettingsRepository
 import io.github.robbieadi.gametap.platform.VolumeKeyInput
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,13 +28,10 @@ class GamepadViewModel(
     private val sender: ReportSender,
     private val screenMode: ScreenModeLock,
     private val haptics: Haptics,
-    settingsRepository: SettingsRepository,
     private val layoutRepository: LayoutRepository,
     private val motionSensor: MotionSensor,
     private val volumeKeyInput: VolumeKeyInput,
 ) : ViewModel() {
-    private val settings: StateFlow<GamepadSettings> = settingsRepository.settings
-
     private val gyro = GyroController(input::setMotion)
     private var shown = false
     private var sensorRunning = false
@@ -45,8 +40,7 @@ class GamepadViewModel(
     val tracker = GamepadTouchTracker(
         layout = layoutRepository.layouts.value.active,
         input = input,
-        floatingSticks = { settings.value.floatingSticks },
-        onPress = { if (settings.value.hapticsEnabled) haptics.tick() },
+        onPress = { if (layoutRepository.layouts.value.active.haptics) haptics.tick() },
         onGyroButtons = gyro::setButtons,
     )
 

@@ -1,6 +1,7 @@
 package io.github.robbieadi.gametap.layout
 
 import io.github.robbieadi.gametap.domain.Button
+import io.github.robbieadi.gametap.domain.DeadzoneCurve
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -203,8 +204,27 @@ sealed interface GamepadControl {
         val radius: Float,
         /** The touch area, larger than [radius] so an imprecise thumb still catches the stick. */
         val grabRadius: Float,
+        /** Share of the travel that sends nothing, 0 to [MAX_DEADZONE]. */
+        val deadzone: Float = DEFAULT_DEADZONE,
+        /** Response curve: 1 is linear, higher is finer near the center, up to [MAX_CURVE]. */
+        val curveExponent: Float = 1f,
+        /** The stick centers where the thumb lands instead of at its drawn position. */
+        val floating: Boolean = false,
     ) : GamepadControl {
         override val shape: Shape get() = Shape.Circle(grabRadius)
+
+        /** Clamped, so an edited layout file cannot break the curve; validation reports it. */
+        val curve: DeadzoneCurve
+            get() = DeadzoneCurve(deadzone.coerceIn(0f, MAX_DEADZONE), curveExponent.coerceIn(MIN_CURVE, MAX_CURVE))
+
+        val tuningIsValid: Boolean get() = deadzone in 0f..MAX_DEADZONE && curveExponent in MIN_CURVE..MAX_CURVE
+
+        companion object {
+            const val DEFAULT_DEADZONE: Float = 0.08f
+            const val MAX_DEADZONE: Float = 0.4f
+            const val MIN_CURVE: Float = 1f
+            const val MAX_CURVE: Float = 3f
+        }
     }
 
     /** Analog trigger: how far the finger drags sets how far the trigger is pulled. */
@@ -276,10 +296,17 @@ data class LayoutProfile(
     val gyro: GyroSetup = GyroSetup(),
     /** Defaults to none, so files written before volume keys existed still read. */
     val volumeKeys: VolumeKeys = VolumeKeys(),
+    /** A short vibration on each press, where the phone can vibrate. */
+    val haptics: Boolean = true,
 ) {
     /** What every button control and bound volume key sends. */
     val buttonActions: List<ButtonAction>
         get() = controls.mapNotNull { (it as? GamepadControl.ButtonControl)?.action } + volumeKeys.actions
+
+    /** The curve of the stick on [side], or the default where the layout has no such stick. */
+    fun stickCurve(side: Side): DeadzoneCurve =
+        controls.firstNotNullOfOrNull { (it as? GamepadControl.StickControl)?.takeIf { stick -> stick.side == side } }?.curve
+            ?: DeadzoneCurve()
 }
 
 /** Everything the layout file holds. [version] lets a later format migrate older files. */

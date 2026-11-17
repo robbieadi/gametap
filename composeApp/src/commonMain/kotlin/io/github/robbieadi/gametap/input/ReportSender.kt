@@ -1,15 +1,15 @@
 package io.github.robbieadi.gametap.input
 
-import io.github.robbieadi.gametap.domain.GamepadSettings
+import io.github.robbieadi.gametap.domain.DeadzoneCurve
 import io.github.robbieadi.gametap.domain.GamepadState
 import io.github.robbieadi.gametap.domain.Stick
 import io.github.robbieadi.gametap.gyro.GyroOutput
 import io.github.robbieadi.gametap.hid.HidDescriptor
 import io.github.robbieadi.gametap.hid.HidReportEncoder
+import io.github.robbieadi.gametap.layout.Side
 import io.github.robbieadi.gametap.platform.HidTransport
 import io.github.robbieadi.gametap.platform.TransportState
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -19,8 +19,8 @@ import kotlin.time.TimeSource
 
 /**
  * Sends a report as soon as input changes, at most once per [minIntervalMs]. Touch and gyro
- * input are combined here: stick values add up after the touch response curve, triggers take
- * the higher value.
+ * input are combined here: stick values add up after each stick's response curve from
+ * [stickCurve], triggers take the higher value.
  *
  * While [lowLatency] is on it also repeats the last report every [activeKeepAliveMs]. That traffic
  * is what keeps latency down: on an idle link, Bluetooth sniff subrating stretches the radio's
@@ -36,7 +36,8 @@ import kotlin.time.TimeSource
 class ReportSender(
     private val input: InputStateHolder,
     private val transport: HidTransport,
-    private val settings: StateFlow<GamepadSettings>,
+    /** The deadzone and response curve of the stick on each side, read for every report. */
+    private val stickCurve: (Side) -> DeadzoneCurve,
     private val minIntervalMs: Long = 8,
     private val activeKeepAliveMs: Long = 16,
     private val idleKeepAliveMs: Long = 500,
@@ -68,11 +69,10 @@ class ReportSender(
     }
 
     private fun encode(state: GamepadState, motion: GyroOutput): ByteArray {
-        val curve = settings.value.stickCurve
         return HidReportEncoder.encode(
             state.copy(
-                leftStick = curve.apply(state.leftStick) + motion.leftStick,
-                rightStick = curve.apply(state.rightStick) + motion.rightStick,
+                leftStick = stickCurve(Side.LEFT).apply(state.leftStick) + motion.leftStick,
+                rightStick = stickCurve(Side.RIGHT).apply(state.rightStick) + motion.rightStick,
                 leftTrigger = maxOf(state.leftTrigger, motion.leftTrigger),
                 rightTrigger = maxOf(state.rightTrigger, motion.rightTrigger),
             ),

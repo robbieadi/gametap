@@ -2,7 +2,7 @@
 
 package io.github.robbieadi.gametap
 
-import io.github.robbieadi.gametap.domain.GamepadSettings
+import io.github.robbieadi.gametap.domain.DeadzoneCurve
 import io.github.robbieadi.gametap.input.InputStateHolder
 import io.github.robbieadi.gametap.input.ReportSender
 import io.github.robbieadi.gametap.platform.BluetoothAccess
@@ -71,7 +71,7 @@ class ConnectionViewModelTest {
     private fun viewModel(transport: HidTransport) = ConnectionViewModel(
         transport,
         access,
-        ReportSender(InputStateHolder(), transport, MutableStateFlow(GamepadSettings())),
+        ReportSender(InputStateHolder(), transport, stickCurve = { DeadzoneCurve() }),
         CoroutineScope(dispatcher),
     )
 

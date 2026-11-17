@@ -5,11 +5,9 @@ import io.github.robbieadi.gametap.input.ReportSender
 import io.github.robbieadi.gametap.layout.LayoutRepository
 import io.github.robbieadi.gametap.layout.LayoutStoreQualifier
 import io.github.robbieadi.gametap.platform.ScreenModeLock
-import io.github.robbieadi.gametap.platform.SettingsRepository
 import io.github.robbieadi.gametap.viewmodel.ConnectionViewModel
 import io.github.robbieadi.gametap.viewmodel.EditorViewModel
 import io.github.robbieadi.gametap.viewmodel.GamepadViewModel
-import io.github.robbieadi.gametap.viewmodel.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,8 +17,8 @@ import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 /**
- * Provides HidTransport, Haptics, ScreenControl, BluetoothAccess, MotionSensor, VolumeKeyInput, the settings
- * DataStore and, under [LayoutStoreQualifier], the layout DataStore.
+ * Provides HidTransport, Haptics, ScreenControl, BluetoothAccess, MotionSensor, VolumeKeyInput and,
+ * under [LayoutStoreQualifier], the layout DataStore.
  */
 expect fun platformModule(): Module
 
@@ -28,11 +26,12 @@ val commonModule: Module = module {
     single<CoroutineScope> { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     single { InputStateHolder() }
     single { ScreenModeLock(get()) }
-    single { SettingsRepository(get(), get()) }
     single { LayoutRepository(get(LayoutStoreQualifier), get()) }
-    single { ReportSender(get(), get(), get<SettingsRepository>().settings) }
+    single {
+        val layouts = get<LayoutRepository>()
+        ReportSender(get(), get(), stickCurve = { side -> layouts.layouts.value.active.stickCurve(side) })
+    }
     viewModelOf(::ConnectionViewModel)
     viewModelOf(::GamepadViewModel)
-    viewModelOf(::SettingsViewModel)
-    viewModel { params -> EditorViewModel(params.get(), get(), get(), get(), get()) }
+    viewModel { params -> EditorViewModel(params.get(), get(), get(), get(), get(), get()) }
 }
