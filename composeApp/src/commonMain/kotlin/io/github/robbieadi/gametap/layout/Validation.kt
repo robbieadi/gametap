@@ -7,8 +7,6 @@ sealed interface LayoutIssue {
 
     data class DuplicateStick(val side: Side, val ids: List<String>) : LayoutIssue
 
-    data class MenuCount(val count: Int) : LayoutIssue
-
     data class DuplicateId(val id: String) : LayoutIssue
 
     data object BlankName : LayoutIssue
@@ -27,8 +25,7 @@ sealed interface LayoutIssue {
     data class InvalidStickTuning(val id: String) : LayoutIssue
 
     /**
-     * Both a Gyro on/off and a Gyro on while held, on buttons ([ids]) or volume keys ([keys]); a
-     * layout uses one way or the other.
+     * More than one gyro mode, on buttons ([ids]) or volume keys ([keys]); a layout uses one.
      */
     data class ConflictingGyroButtons(val ids: List<String>, val keys: List<VolumeKey> = emptyList()) : LayoutIssue
 }
@@ -47,27 +44,27 @@ fun LayoutProfile.validate(screen: ScreenSize, otherNames: Set<String> = emptySe
             .filterValues { it.size > 1 }
             .keys.forEach { add(LayoutIssue.DuplicateId(it)) }
 
-        val menus = controls.count { it is GamepadControl.MenuControl }
-        if (menus != 1) add(LayoutIssue.MenuCount(menus))
-
         controls.filterIsInstance<GamepadControl.StickControl>()
             .groupBy { it.side }
             .filterValues { it.size > 1 }
             .forEach { (side, sticks) -> add(LayoutIssue.DuplicateStick(side, sticks.map { it.id })) }
 
-        gyro.bindings.groupBy { it.target }
-            .filterValues { it.size > 1 }
-            .keys.forEach { add(LayoutIssue.DuplicateGyroTarget(it)) }
-        gyro.bindings.filterNot { it.isValid() }
-            .mapTo(LinkedHashSet()) { it.target }
-            .forEach { add(LayoutIssue.InvalidGyroBinding(it)) }
-        if (gyro.deadzone !in 0f..GyroSetup.MAX_DEADZONE) add(LayoutIssue.InvalidGyroDeadzone)
+        // Without a gyro button or key the settings are unused and cannot be reached in the editor.
+        if (gyroMode != null) {
+            gyro.bindings.groupBy { it.target }
+                .filterValues { it.size > 1 }
+                .keys.forEach { add(LayoutIssue.DuplicateGyroTarget(it)) }
+            gyro.bindings.filterNot { it.isValid() }
+                .mapTo(LinkedHashSet()) { it.target }
+                .forEach { add(LayoutIssue.InvalidGyroBinding(it)) }
+            if (gyro.deadzone !in 0f..GyroSetup.MAX_DEADZONE) add(LayoutIssue.InvalidGyroDeadzone)
+        }
         controls.filterIsInstance<GamepadControl.StickControl>()
             .filterNot { it.tuningIsValid }
             .forEach { add(LayoutIssue.InvalidStickTuning(it.id)) }
-        if (buttonActions.filterTo(HashSet()) { it in GYRO_SWITCHES }.size > 1) {
-            val ids = controls.filter { (it as? GamepadControl.ButtonControl)?.action in GYRO_SWITCHES }.map { it.id }
-            val keys = VolumeKey.entries.filter { volumeKeys[it] in GYRO_SWITCHES }
+        if (buttonActions.filterTo(HashSet()) { it in GYRO_MODES }.size > 1) {
+            val ids = controls.filter { (it as? GamepadControl.ButtonControl)?.action in GYRO_MODES }.map { it.id }
+            val keys = VolumeKey.entries.filter { volumeKeys[it] in GYRO_MODES }
             add(LayoutIssue.ConflictingGyroButtons(ids, keys))
         }
 
@@ -84,13 +81,13 @@ fun LayoutProfile.validate(screen: ScreenSize, otherNames: Set<String> = emptySe
         }
     }
 
-/** The button actions that turn gyro on. A layout may use only one of them. */
-val GYRO_SWITCHES: Set<ButtonAction> = setOf(ButtonAction.Gyro(GyroButton.TOGGLE), ButtonAction.Gyro(GyroButton.HOLD))
+/** One button action per gyro mode. A layout may use only one of them. */
+val GYRO_MODES: Set<ButtonAction> = GyroButton.entries.mapTo(LinkedHashSet()) { ButtonAction.Gyro(it) }
 
-/** The gyro switches a button or key may not take, given what the [others] already send. */
-fun blockedGyroSwitches(others: Iterable<ButtonAction>): Set<ButtonAction> {
-    val used = others.filterTo(HashSet()) { it in GYRO_SWITCHES }
-    return if (used.isEmpty()) emptySet() else GYRO_SWITCHES - used
+/** The gyro modes a button or key may not take, given what the [others] already send. */
+fun blockedGyroModes(others: Iterable<ButtonAction>): Set<ButtonAction> {
+    val used = others.filterTo(HashSet()) { it in GYRO_MODES }
+    return if (used.isEmpty()) emptySet() else GYRO_MODES - used
 }
 
 private fun GyroBinding.isValid(): Boolean {
@@ -123,7 +120,7 @@ fun List<LayoutIssue>.controlIds(): Set<String> = flatMapTo(HashSet()) { issue -
         is LayoutIssue.DuplicateId -> listOf(issue.id)
         is LayoutIssue.ConflictingGyroButtons -> issue.ids
         is LayoutIssue.InvalidStickTuning -> listOf(issue.id)
-        is LayoutIssue.MenuCount, LayoutIssue.BlankName, LayoutIssue.DuplicateName,
+        LayoutIssue.BlankName, LayoutIssue.DuplicateName,
         is LayoutIssue.DuplicateGyroTarget, is LayoutIssue.InvalidGyroBinding, LayoutIssue.InvalidGyroDeadzone,
         -> emptyList()
     }

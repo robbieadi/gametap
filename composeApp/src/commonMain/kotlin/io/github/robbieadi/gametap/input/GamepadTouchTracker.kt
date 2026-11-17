@@ -9,7 +9,6 @@ import io.github.robbieadi.gametap.layout.DpadDirection
 import io.github.robbieadi.gametap.layout.GamepadControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
 import io.github.robbieadi.gametap.layout.GamepadControl.DpadControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ThrottleControl
 import io.github.robbieadi.gametap.layout.GyroButton
@@ -36,13 +35,11 @@ data class StickView(val origin: TouchPoint, val value: Stick)
  * A buttons light up separately and the D-pad cross shows only its own direction.
  */
 data class TouchView(
-    /** Buttons and the menu control under a finger. */
+    /** Buttons under a finger. */
     val pressed: Set<String> = emptySet(),
     val dpads: Map<String, Dpad> = emptyMap(),
     val throttles: Map<String, Float> = emptyMap(),
     val sticks: Map<String, StickView> = emptyMap(),
-    /** A finger rests on the menu control. The screen times the long press. */
-    val menuHeld: Boolean = false,
 ) {
     fun isPressed(control: GamepadControl): Boolean = control.id in pressed
 }
@@ -159,7 +156,6 @@ class GamepadTouchTracker(
         val throttles = HashMap<String, Float>()
         val sticks = HashMap<String, StickView>()
 
-        var menuHeld = false
 
         fun pullTrigger(side: Side, value: Float) {
             when (side) {
@@ -194,10 +190,6 @@ class GamepadTouchTracker(
                         pressed += control.id
                         send(control.action)
                     }
-                    is MenuControl -> {
-                        pressed += control.id
-                        menuHeld = true
-                    }
                     else -> Unit // Empty space, or an analog control already held by another finger.
                 }
                 continue
@@ -222,7 +214,7 @@ class GamepadTouchTracker(
                     dpads[control.id] = value
                     dpad = dpad or value
                 }
-                is ButtonControl, is MenuControl -> Unit // Never captured.
+                is ButtonControl -> Unit // Never captured.
             }
         }
 
@@ -233,7 +225,7 @@ class GamepadTouchTracker(
         lastDigital = touched
         for (key in keys) layout.volumeKeys[key]?.let(::send)
 
-        mutableView.value = TouchView(pressed, dpads, throttles, sticks, menuHeld)
+        mutableView.value = TouchView(pressed, dpads, throttles, sticks)
         input.set(GamepadState(buttons, dpad, leftStick, rightStick, leftTrigger, rightTrigger))
         onGyroButtons(gyroButtons)
     }

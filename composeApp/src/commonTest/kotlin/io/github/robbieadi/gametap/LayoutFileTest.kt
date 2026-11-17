@@ -6,7 +6,6 @@ import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.Anchor
 import io.github.robbieadi.gametap.layout.ButtonAction
 import io.github.robbieadi.gametap.layout.DefaultLayout
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GyroAxis
 import io.github.robbieadi.gametap.layout.GyroBinding
 import io.github.robbieadi.gametap.layout.GyroButton
@@ -26,8 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class LayoutFileTest {
-    private val menu = MenuControl("menu", Position(Anchor.LEFT, 0.1f, 0.1f), Shape.Circle(0.05f))
-    private val racing = LayoutProfile("racing", "Racing", listOf(menu))
+    private val racing = LayoutProfile("racing", "Racing", emptyList())
 
     private suspend fun read(json: String): LayoutStore = LayoutStoreSerializer.readFrom(Buffer().writeUtf8(json))
 
@@ -128,7 +126,7 @@ class LayoutFileTest {
             "ls", Position(Anchor.LEFT, 0.4f, 0.5f), Side.LEFT, 0.15f, 0.2f,
             deadzone = 0.2f, curveExponent = 2.5f, floating = true,
         )
-        val store = LayoutStore(activeProfileId = racing.id, profiles = listOf(racing.copy(controls = listOf(menu, stick), haptics = false)))
+        val store = LayoutStore(activeProfileId = racing.id, profiles = listOf(racing.copy(controls = listOf(stick), haptics = false)))
         val buffer = Buffer()
         LayoutStoreSerializer.writeTo(store, buffer)
         assertEquals(store, LayoutStoreSerializer.readFrom(buffer))
@@ -152,5 +150,21 @@ class LayoutFileTest {
         assertEquals(1f, stick.curveExponent)
         assertEquals(false, stick.floating)
         assertEquals(true, profile.haptics)
+    }
+
+    /** Written when a menu control opened the menu, before the status pill did. */
+    @Test
+    fun oldMenuControlIsDroppedAndTheProfileKept() = runTest {
+        val store = read(
+            """
+            {"version":1,"activeProfileId":"racing","profiles":[
+              {"id":"racing","name":"Racing","controls":[
+                {"type":"menu","id":"menu","position":{"anchor":"left","x":0.1,"y":0.1},
+                 "shape":{"type":"circle","r":0.05},"label":"☰"},
+                {"type":"dpad","id":"dpad","position":{"anchor":"center","x":0.0,"y":0.5},"radius":0.17}]}
+            ]}
+            """.trimIndent(),
+        )
+        assertEquals(listOf("dpad"), store.profiles.single().controls.map { it.id })
     }
 }

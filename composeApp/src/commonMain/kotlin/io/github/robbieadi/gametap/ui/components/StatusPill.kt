@@ -1,6 +1,8 @@
 package io.github.robbieadi.gametap.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -13,7 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.robbieadi.gametap.platform.TransportState
@@ -34,12 +38,25 @@ private fun TransportState.color(): Color = when (this) {
     TransportState.Unsupported, is TransportState.Error -> GamepadColors.Error
 }
 
+/** With [onClick], the pill is the gamepad's menu button: larger, and outlined like the controls. */
 @Composable
-fun StatusPill(state: TransportState, modifier: Modifier = Modifier) {
+fun StatusPill(state: TransportState, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+    val shape = RoundedCornerShape(50)
     Row(
         modifier = modifier
-            .background(GamepadColors.Surface, RoundedCornerShape(50))
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .clip(shape)
+            .background(GamepadColors.Surface, shape)
+            .then(
+                if (onClick != null) {
+                    // The same 1.5 px outline the gamepad canvas draws around its controls.
+                    Modifier
+                        .border(with(LocalDensity.current) { 1.5f.toDp() }, GamepadColors.Outline, shape)
+                        .clickable(onClickLabel = "Open menu", onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = if (onClick != null) 18.dp else 12.dp, vertical = if (onClick != null) 10.dp else 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

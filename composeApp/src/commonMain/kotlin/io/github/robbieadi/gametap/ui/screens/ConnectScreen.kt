@@ -81,6 +81,6 @@ private fun helpText(state: TransportState, permissionDenied: Boolean): String =
         "This phone cannot advertise as a Bluetooth Low Energy device, so it cannot act as a controller."
     state == TransportState.Advertising ->
         "On your PC, open Bluetooth settings, add a device and choose this phone."
-    state is TransportState.Connected -> "Hold the ☰ button on the gamepad for the menu."
+    state is TransportState.Connected -> "Tap the status at the top of the gamepad for the menu."
     else -> "Your phone becomes a Bluetooth gamepad. The host needs no app or driver."
 }

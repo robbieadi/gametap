@@ -3,7 +3,6 @@ package io.github.robbieadi.gametap.layout
 import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
 import io.github.robbieadi.gametap.layout.GamepadControl.DpadControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ThrottleControl
 
@@ -19,8 +18,6 @@ object DefaultLayout {
         id = PROFILE_ID,
         name = "Default",
         controls = listOf(
-            MenuControl("menu", left(0.07f, 0.07f), Shape.Circle(0.055f)),
-
             ThrottleControl("lt", left(0.267f, 0.14f), Side.LEFT, halfW = 0.10f, halfH = 0.12f, label = "LT"),
             button("lb", left(0.578f, 0.10f), Button.LB, "LB", Shape.Rect(0.12f, 0.08f)),
             ThrottleControl("rt", right(0.267f, 0.14f), Side.RIGHT, halfW = 0.10f, halfH = 0.12f, label = "RT"),

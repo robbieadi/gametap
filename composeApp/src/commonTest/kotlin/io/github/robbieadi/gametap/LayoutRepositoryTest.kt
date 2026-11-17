@@ -7,7 +7,6 @@ import io.github.robbieadi.gametap.layout.Anchor
 import io.github.robbieadi.gametap.layout.ButtonAction
 import io.github.robbieadi.gametap.layout.DefaultLayout
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.LayoutRepository
 import io.github.robbieadi.gametap.layout.LayoutStore
@@ -23,9 +22,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 
 class LayoutRepositoryTest {
-    private val menu = MenuControl("menu", Position(Anchor.LEFT, 0.1f, 0.1f), Shape.Circle(0.05f))
     private val jump = ButtonControl("jump", Position(Anchor.RIGHT, 0.3f, 0.5f), Shape.Circle(0.1f), ButtonAction.Pad(Button.A), "🦘")
-    private val racing = LayoutProfile("racing", "Racing", listOf(menu, jump))
+    private val racing = LayoutProfile("racing", "Racing", listOf(jump))
 
     private fun store(vararg profiles: LayoutProfile, active: String = DefaultLayout.PROFILE_ID) =
         InMemoryDataStore(LayoutStore(activeProfileId = active, profiles = profiles.toList()))
@@ -120,23 +118,6 @@ class LayoutRepositoryTest {
         val impostor = racing.copy(id = DefaultLayout.PROFILE_ID)
         val layouts = repository(store(impostor)).layouts.value
         assertEquals(listOf(DefaultLayout.profile), layouts.profiles)
-    }
-
-    @Test
-    fun profileWithoutAMenuGetsOneOnTop() = runTest {
-        val noMenu = racing.copy(controls = listOf(jump, jump.copy(id = "menu")))
-        val loaded = repository(store(noMenu)).layouts.value.find(racing.id)
-
-        val added = assertNotNull(loaded).controls.last()
-        assertEquals(MenuControl::class, added::class)
-        assertEquals("menu_1", added.id, "must not reuse an id already in the profile")
-    }
-
-    @Test
-    fun extraMenusAreDropped() = runTest {
-        val twoMenus = racing.copy(controls = listOf(menu, jump, menu.copy(id = "menu2")))
-        val loaded = repository(store(twoMenus)).layouts.value.find(racing.id)
-        assertEquals(listOf(menu, jump), assertNotNull(loaded).controls)
     }
 
     @Test

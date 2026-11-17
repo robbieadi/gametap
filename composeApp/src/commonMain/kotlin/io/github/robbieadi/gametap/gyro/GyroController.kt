@@ -1,6 +1,5 @@
 package io.github.robbieadi.gametap.gyro
 
-import io.github.robbieadi.gametap.layout.GYRO_SWITCHES
 import io.github.robbieadi.gametap.layout.GyroButton
 import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.layout.LayoutProfile
@@ -13,18 +12,17 @@ import kotlin.concurrent.Volatile
 /**
  * Turns orientation samples into [GyroOutput] for the active profile.
  *
- * A profile without a gyro on/off or hold button or volume key has gyro on all the time. Otherwise it is on
- * while a [GyroButton.TOGGLE], which starts off, has turned it on, or while a [GyroButton.HOLD] is
- * held. Validation allows only one of the two, so the player turns gyro on once their grip is
- * settled and that angle becomes neutral.
+ * The profile's [LayoutProfile.gyroMode] decides when gyro is on: always with
+ * [GyroButton.RECENTER], while a [GyroButton.TOGGLE], which starts off, has turned it on, or while
+ * a [GyroButton.HOLD] is held. A profile without a gyro button or key has no gyro. Turning gyro on
+ * makes that angle neutral, so the player turns it on once their grip is settled.
  *
  * Samples arrive on the sensor's thread and everything else on the UI thread. The UI thread only
  * writes the volatile flags and [toggledOn]; the neutral angle belongs to the sensor thread alone.
  */
 class GyroController(private val sink: (GyroOutput) -> Unit) {
     @Volatile private var setup = GyroSetup()
-    /** The profile has a toggle or hold button, so gyro is off until one is used. */
-    @Volatile private var switched = false
+    @Volatile private var mode: GyroButton? = null
     @Volatile private var held = false
     private val mutableToggledOn = MutableStateFlow(false)
 
@@ -44,7 +42,7 @@ class GyroController(private val sink: (GyroOutput) -> Unit) {
     /** A new profile starts toggled off and recentered. */
     fun setLayout(profile: LayoutProfile) {
         setup = profile.gyro
-        switched = profile.buttonActions.any { it in GYRO_SWITCHES }
+        mode = profile.gyroMode
         mutableToggledOn.value = false
         recenter()
     }
@@ -90,7 +88,12 @@ class GyroController(private val sink: (GyroOutput) -> Unit) {
             sink(GyroOutput.Zero)
             return
         }
-        val active = !switched || mutableToggledOn.value || held
+        val active = when (mode) {
+            GyroButton.RECENTER -> true
+            GyroButton.TOGGLE -> mutableToggledOn.value
+            GyroButton.HOLD -> held
+            null -> false
+        }
         sink(if (active) setup.output(tilt) else GyroOutput.Zero)
     }
 

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,10 +42,7 @@ import io.github.robbieadi.gametap.ui.components.OverlayDialog
 import io.github.robbieadi.gametap.ui.components.StatusPill
 import io.github.robbieadi.gametap.ui.theme.GamepadColors
 import io.github.robbieadi.gametap.viewmodel.GamepadViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
-
-private const val MENU_HOLD_MS = 700L
 
 @Composable
 fun GamepadScreen(
@@ -65,16 +61,6 @@ fun GamepadScreen(
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
-
-    // Restarts on every change, so lifting or sliding off the menu control cancels the hold.
-    val menuHeld by remember { derivedStateOf { touchView.value.menuHeld } }
-    LaunchedEffect(menuHeld) {
-        if (menuHeld) {
-            delay(MENU_HOLD_MS)
-            viewModel.onMenuOpened()
-            menuOpen = true
-        }
-    }
 
     LaunchedEffect(menuOpen) { viewModel.setMenuOpen(menuOpen) }
 
@@ -127,7 +113,7 @@ fun GamepadScreen(
                                 val id = change.id.value
                                 val position = change.position
                                 when {
-                                    // A consumed down landed on the banner, so it stays off the controls.
+                                    // A consumed down landed on the status pill or the banner, so it stays off the controls.
                                     change.changedToDownIgnoreConsumed() ->
                                         if (!change.isConsumed) tracker.down(id, position.x, position.y)
                                     change.changedToUpIgnoreConsumed() -> tracker.up(id)
@@ -148,7 +134,11 @@ fun GamepadScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            StatusPill(transport)
+            // The menu button. It sits where no thumb rests, so a tap is enough.
+            StatusPill(transport) {
+                viewModel.onMenuOpened()
+                menuOpen = true
+            }
             if (showBanner) {
                 FitBanner(onEdit = { onEditLayout(layout.id) }, onDismiss = { dismissedFor = layout to size })
             }

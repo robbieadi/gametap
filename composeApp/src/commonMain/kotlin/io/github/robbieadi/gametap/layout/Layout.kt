@@ -73,18 +73,19 @@ sealed interface ButtonAction {
     data class Gyro(val action: GyroButton) : ButtonAction
 }
 
+/**
+ * The gyro mode a button or volume key sets for its profile. A profile uses one mode, on any
+ * number of buttons and keys; without any, it has no gyro.
+ */
 @Serializable
 enum class GyroButton {
     /** Gyro works while this is held, and pressing it sets the neutral angle. */
     @SerialName("hold") HOLD,
 
-    /**
-     * Turns gyro on and off. It starts off with each profile, and turning it on sets the neutral
-     * angle. A profile with a toggle or hold button has gyro off unless one of them turns it on.
-     */
+    /** Turns gyro on and off. It starts off with each profile, and turning it on sets the neutral angle. */
     @SerialName("toggle") TOGGLE,
 
-    /** The current angle becomes neutral. */
+    /** Gyro is always on, and pressing this makes the current angle neutral. */
     @SerialName("recenter") RECENTER,
 }
 
@@ -165,6 +166,9 @@ data class GyroSetup(
     fun binding(target: GyroTarget): GyroBinding? = bindings.firstOrNull { it.target == target }
 
     companion object {
+        /** Aiming with the right stick, for a layout's first gyro button. */
+        val DEFAULT_BINDINGS: List<GyroBinding> = listOf(GyroBinding.StickBinding(Side.RIGHT))
+
         const val DEFAULT_DEADZONE: Float = 1f
         /** Below [GyroBinding.MIN_RANGE], so every binding has some travel. */
         const val MAX_DEADZONE: Float = 4f
@@ -251,16 +255,6 @@ sealed interface GamepadControl {
     ) : GamepadControl {
         override val shape: Shape get() = Shape.Circle(radius)
     }
-
-    /** Exactly one per profile. A long press opens the app menu. It sends nothing to the host. */
-    @Serializable
-    @SerialName("menu")
-    data class MenuControl(
-        override val id: String,
-        override val position: Position,
-        override val shape: Shape,
-        val label: String = "☰",
-    ) : GamepadControl
 }
 
 /** The phone's hardware keys a profile can bind. */
@@ -302,6 +296,14 @@ data class LayoutProfile(
     /** What every button control and bound volume key sends. */
     val buttonActions: List<ButtonAction>
         get() = controls.mapNotNull { (it as? GamepadControl.ButtonControl)?.action } + volumeKeys.actions
+
+    /**
+     * How gyro is switched, from the gyro buttons and keys; null when there are none, so the
+     * profile has no gyro. A profile mixing modes is invalid; until it is fixed, hold wins over
+     * toggle and toggle over always on, as before modes were exclusive.
+     */
+    val gyroMode: GyroButton?
+        get() = buttonActions.mapNotNullTo(HashSet()) { (it as? ButtonAction.Gyro)?.action }.minByOrNull { it.ordinal }
 
     /** The curve of the stick on [side], or the default where the layout has no such stick. */
     fun stickCurve(side: Side): DeadzoneCurve =

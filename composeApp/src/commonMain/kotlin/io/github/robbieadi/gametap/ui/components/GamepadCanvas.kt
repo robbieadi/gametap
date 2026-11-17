@@ -66,8 +66,6 @@ fun GamepadCanvas(
                     drawButton(area, control.label, current.isPressed(control), measurer, labelStyle)
                     if (lit && control.action == ButtonAction.Gyro(GyroButton.TOGGLE)) drawRing(area)
                 }
-                is GamepadControl.MenuControl ->
-                    drawButton(area, control.label, current.isPressed(control), measurer, labelStyle)
                 is GamepadControl.StickControl ->
                     drawStick(area as Area.Circle, control.radius * size.height, current.sticks[control.id])
                 is GamepadControl.ThrottleControl ->

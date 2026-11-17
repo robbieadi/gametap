@@ -58,8 +58,8 @@ under a second, unless you pressed **Stop**. Any control held when you leave is 
 On iOS the gamepad keeps running in the background. If you close Gametap from the app switcher
 or restart the phone, a Linux host may stop reconnecting, see [Linux hosts](#linux-hosts).
 
-Hold the ☰ button on the gamepad to open the menu, where you switch layouts, edit the current one
-or exit.
+Tap the connection status at the top of the gamepad to open the menu, where you switch layouts,
+edit the current one or exit.
 
 ### Sticks and haptics
 
@@ -71,21 +71,29 @@ press on or off for the layout; the button is hidden on devices that cannot vibr
 
 ### Gyro
 
-Tap **Gyro** in the layout editor to drive outputs by tilting the phone. Each stick takes the
-horizontal tilt, the vertical tilt or both; each trigger takes one direction of one axis, such as
-"pulls when tilted right". One tilt can drive several outputs. Horizontal is either steering
-(turning the phone like a wheel) or turning (around its vertical axis), set per layout.
+Gyro drives outputs by tilting the phone. In the layout editor, **+ Add** › **Gyro button** adds a
+gyro button that aims with the right stick while held, and selecting a gyro button shows its
+settings. Each stick takes the horizontal tilt, the vertical
+tilt or both; each trigger takes one direction of one axis, such as "pulls when tilted right". One
+tilt can drive several outputs. Horizontal is either steering (turning the phone like a wheel) or
+turning (around its vertical axis).
 
-Tilt is measured from the angle the phone has when gyro turns on. Three button actions control
-it: **Gyro on/off**, which starts off with each layout, **Gyro on while held**, and **Recenter
-gyro**. A layout can use one of the first two, not both. With neither, gyro is on whenever the
-gamepad is open.
+The gyro button's action sets the mode, one per layout:
+
+- **Gyro while held**: gyro works while the button is held.
+- **Gyro on/off**: a press turns gyro on and the next turns it off. It starts off with each layout.
+- **Gyro always on**: gyro is on whenever the gamepad is open, and a press recenters it.
+
+Tilt is measured from the angle the phone has when gyro turns on, or when it is recentered. A
+layout can have several gyro buttons, and volume keys can take gyro actions too, but they must all
+use the same mode and they share one set of settings. A layout without a gyro button or key has
+no gyro.
 
 Gyro adds to the touch stick, after the stick's response curve, and a gyro trigger and a touch
 trigger take the higher value.
 
 The sensor is Android's game rotation vector (gyroscope and accelerometer, no compass), read at
-200 Hz only while the gamepad is on screen and the layout has gyro bindings. Devices without a
+200 Hz only while the gamepad is on screen and the layout has a gyro button and gyro bindings. Devices without a
 gyroscope, such as many budget tablets, fall back to the accelerometer alone. It measures
 steering and forward/back tilt from the direction of gravity, smoothed over about 20 ms to hide
 the phone's own movement, and cannot measure turning. The editor says when this applies. While gyro is active

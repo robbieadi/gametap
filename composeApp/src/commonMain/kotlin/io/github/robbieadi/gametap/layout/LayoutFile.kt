@@ -7,6 +7,10 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.core.okio.OkioSerializer
 import androidx.datastore.core.okio.OkioStorage
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -20,7 +24,7 @@ import org.koin.core.qualifier.named
 
 const val LAYOUT_FILE_NAME = "layouts.json"
 
-/** Koin keys definitions by class alone, so this tells the layout DataStore from the settings one. */
+/** Koin keys definitions by class alone, so this names the layout DataStore. */
 val LayoutStoreQualifier = named("layouts")
 
 fun layoutDataStore(fileSystem: FileSystem, path: () -> Path): DataStore<LayoutStore> = DataStoreFactory.create(
@@ -46,7 +50,7 @@ internal object LayoutStoreSerializer : OkioSerializer<LayoutStore> {
             throw CorruptionException("Layout file is not a JSON object", e)
         }
         val profiles = runCatchingFormat { root["profiles"]?.jsonArray }.orEmpty().mapNotNull { element ->
-            runCatchingFormat { LayoutJson.decodeFromJsonElement(LayoutProfile.serializer(), element) }
+            runCatchingFormat { LayoutJson.decodeFromJsonElement(LayoutProfile.serializer(), element.withoutMenuControl()) }
         }
         return LayoutStore(
             version = runCatchingFormat { root["version"]?.jsonPrimitive?.intOrNull } ?: LayoutStore.CURRENT_VERSION,
@@ -58,6 +62,17 @@ internal object LayoutStoreSerializer : OkioSerializer<LayoutStore> {
 
     override suspend fun writeTo(t: LayoutStore, sink: BufferedSink) {
         sink.writeUtf8(LayoutJson.encodeToString(LayoutStore.serializer(), t))
+    }
+
+    /**
+     * Files written before the status pill opened the menu hold a "menu" control. Dropping it
+     * keeps those profiles readable instead of losing them as unknown.
+     */
+    private fun JsonElement.withoutMenuControl(): JsonElement {
+        val profile = this as? JsonObject ?: return this
+        val controls = profile["controls"] as? JsonArray ?: return this
+        val kept = controls.filterNot { ((it as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull == "menu" }
+        return if (kept.size == controls.size) this else JsonObject(profile + ("controls" to JsonArray(kept)))
     }
 
     /** Null when the JSON has the wrong shape. Both exception types mean that here. */

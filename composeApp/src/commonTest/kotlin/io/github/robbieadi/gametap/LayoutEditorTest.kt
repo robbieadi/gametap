@@ -1,12 +1,13 @@
 package io.github.robbieadi.gametap
 
+import io.github.robbieadi.gametap.layout.blockedGyroModes
+import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.Anchor
 import io.github.robbieadi.gametap.layout.ButtonAction
 import io.github.robbieadi.gametap.layout.EditorMetrics
 import io.github.robbieadi.gametap.layout.GamepadControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.Guide
 import io.github.robbieadi.gametap.layout.GyroAxis
@@ -38,7 +39,7 @@ class LayoutEditorTest {
 
     private fun at(xPx: Float, yPx: Float) = Position(Anchor.LEFT, xPx / 500f, yPx / 500f)
 
-    private val menu = MenuControl("menu", at(40f, 40f), Shape.Circle(0.06f))                                    // r30
+    private val corner = ButtonControl("corner", at(40f, 40f), Shape.Circle(0.06f), ButtonAction.Pad(Button.SELECT), "Sel") // r30
     private val a = ButtonControl("a", at(500f, 250f), Shape.Circle(0.1f), ButtonAction.Pad(Button.A), "A")      // r50
     private val b = ButtonControl("b", at(800f, 250f), Shape.Circle(0.1f), ButtonAction.Pad(Button.B), "B")      // r50
 
@@ -61,7 +62,7 @@ class LayoutEditorTest {
 
     @Test
     fun tapSelectsAndTapOnEmptySpaceDeselects() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.tap(500f, 250f)
         assertEquals("a", editor.s.selectedId)
         editor.tap(300f, 450f)
@@ -70,7 +71,7 @@ class LayoutEditorTest {
 
     @Test
     fun repeatedTapsCycleThroughStackedControls() {
-        val editor = editor(menu, a, a.copy(id = "c"))
+        val editor = editor(corner, a, a.copy(id = "c"))
         editor.tap(500f, 250f)
         assertEquals("c", editor.s.selectedId, "the control on top first")
         editor.tap(500f, 250f)
@@ -81,7 +82,7 @@ class LayoutEditorTest {
 
     @Test
     fun dragMovesAndIsOneUndoStep() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.press(500f, 250f)
         editor.dragTo(400f, 300f)
         editor.dragTo(300f, 350f)
@@ -97,14 +98,14 @@ class LayoutEditorTest {
 
     @Test
     fun tapLeavesNoUndoStep() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         assertFalse(editor.s.canUndo)
     }
 
     @Test
     fun dragSnapsToOtherControlsAndShowsGuides() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.press(500f, 250f)
         // Raw center (505, 350): the center is 5 px off the screen's middle, the top edge lines up with b's bottom.
         editor.dragTo(505f, 350f)
@@ -117,14 +118,14 @@ class LayoutEditorTest {
 
     @Test
     fun dragWithNothingToSnapToRoundsToTheGrid() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.drag(500f, 250f, 300.4f, 333.3f)
         assertEquals(Position(Anchor.LEFT, 300f / 500f, 335f / 500f), editor.control("a").position)
     }
 
     @Test
     fun droppingInTheRightThirdAnchorsToTheRightEdge() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.drag(500f, 250f, 905f, 450f)
         // Snapped 5 px left to line up with b's right edge.
         assertEquals(Position(Anchor.RIGHT, 100f / 500f, 450f / 500f), editor.control("a").position)
@@ -132,7 +133,7 @@ class LayoutEditorTest {
 
     @Test
     fun handleResizesWithAMinimum() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         val (hx, hy) = editor.handleOf(editor.control("a"))
         editor.press(hx, hy)
@@ -146,7 +147,7 @@ class LayoutEditorTest {
     @Test
     fun stickResizeKeepsBaseAndTouchAreaInProportion() {
         val stick = StickControl("s", at(500f, 250f), Side.LEFT, radius = 0.17f, grabRadius = 0.2f)
-        val editor = editor(menu, stick)
+        val editor = editor(corner, stick)
         editor.tap(500f, 250f)
         val (hx, hy) = editor.handleOf(editor.control("s"))
         editor.drag(hx, hy, 500f, 400f)
@@ -157,7 +158,7 @@ class LayoutEditorTest {
 
     @Test
     fun addedControlLandsInFreeSpaceAndIsSelected() {
-        val editor = editor(menu, a, b)
+        val editor = editor(corner, a, b)
         editor.add(NewControl.Button(ButtonAction.Pad(Button.Y)))
         val added = editor.control("n0") as ButtonControl
         assertEquals("Y", added.label)
@@ -167,31 +168,26 @@ class LayoutEditorTest {
 
     @Test
     fun stickSidesInUseAreReported() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.add(NewControl.Stick(Side.RIGHT))
         assertEquals(setOf(Side.RIGHT), editor.s.stickSides)
     }
 
     @Test
-    fun duplicateAndDeleteSkipTheMenu() {
-        val editor = editor(menu, a)
-        editor.tap(40f, 40f)
-        editor.duplicate()
-        editor.delete()
-        assertEquals(listOf(menu, a), editor.s.draft.controls)
-
+    fun duplicateGoesIntoFreeSpaceAndDeleteDeselects() {
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.duplicate()
         assertEquals(3, editor.s.draft.controls.size)
         assertEquals(emptyList(), editor.s.issues, "the copy goes into free space")
         editor.delete()
-        assertEquals(listOf(menu, a), editor.s.draft.controls)
+        assertEquals(listOf(corner, a), editor.s.draft.controls)
         assertNull(editor.s.selectedId)
     }
 
     @Test
     fun defaultLabelFollowsTheActionButACustomOneStays() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.setAction(ButtonAction.Pad(Button.B))
         assertEquals("B", (editor.control("a") as ButtonControl).label)
@@ -202,7 +198,7 @@ class LayoutEditorTest {
 
     @Test
     fun typingALabelIsOneUndoStep() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.setLabel("J")
         editor.setLabel("Ju")
@@ -213,7 +209,7 @@ class LayoutEditorTest {
 
     @Test
     fun shapeConvertsBothWays() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.setShape(round = false)
         assertEquals(Shape.Rect(0.1f, 0.1f), editor.control("a").shape)
@@ -223,7 +219,7 @@ class LayoutEditorTest {
 
     @Test
     fun changingTheAnchorKeepsTheControlInPlace() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.setAnchor(Anchor.RIGHT)
         assertEquals(Position(Anchor.RIGHT, 1f, 0.5f), editor.control("a").position)
@@ -232,7 +228,7 @@ class LayoutEditorTest {
 
     @Test
     fun nudgeMovesOneGridStep() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.nudge(1, -1)
         assertEquals(at(505f, 245f), editor.control("a").position)
@@ -240,7 +236,7 @@ class LayoutEditorTest {
 
     @Test
     fun issueButtonCyclesThroughFlaggedControls() {
-        val editor = editor(menu, a, a.copy(id = "c"))
+        val editor = editor(corner, a, a.copy(id = "c"))
         assertEquals(listOf(LayoutIssue.Overlap("a", "c")), editor.s.issues)
         editor.selectNextIssue()
         assertEquals("a", editor.s.selectedId)
@@ -252,14 +248,14 @@ class LayoutEditorTest {
 
     @Test
     fun takenNameIsAnIssue() {
-        val editor = editor(menu, a, otherNames = setOf("Racing"))
+        val editor = editor(corner, a, otherNames = setOf("Racing"))
         editor.rename("Racing")
         assertEquals(listOf(LayoutIssue.DuplicateName), editor.s.issues)
     }
 
     @Test
     fun gyroBindingsAreSetReplacedRemovedAndUndone() {
-        val editor = editor(menu)
+        val editor = editor(corner)
         editor.setGyroBinding(GyroTarget.RIGHT_TRIGGER, GyroBinding.TriggerBinding(Side.RIGHT, GyroAxis.HORIZONTAL))
         editor.setGyroBinding(GyroTarget.LEFT_STICK, GyroBinding.StickBinding(Side.LEFT))
         assertEquals(listOf(GyroTarget.LEFT_STICK, GyroTarget.RIGHT_TRIGGER), editor.s.draft.gyro.bindings.map { it.target })
@@ -276,7 +272,7 @@ class LayoutEditorTest {
 
     @Test
     fun gyroRangeDragIsOneUndoStepAndStaysInBounds() {
-        val editor = editor(menu)
+        val editor = editor(corner)
         editor.setGyroBinding(GyroTarget.LEFT_STICK, GyroBinding.StickBinding(Side.LEFT))
         editor.setGyroRange(GyroTarget.LEFT_STICK, 40f)
         editor.setGyroRange(GyroTarget.LEFT_STICK, 500f)
@@ -287,7 +283,7 @@ class LayoutEditorTest {
 
     @Test
     fun gyroSettingsAreEdited() {
-        val editor = editor(menu)
+        val editor = editor(corner)
         editor.setGyroHorizontal(GyroHorizontal.YAW)
         editor.setGyroDeadzone(2.5f)
         assertEquals(GyroHorizontal.YAW, editor.s.draft.gyro.horizontal)
@@ -297,7 +293,7 @@ class LayoutEditorTest {
 
     @Test
     fun volumeKeysAreBoundClearedAndUndone() {
-        val editor = editor(menu)
+        val editor = editor(corner)
         editor.setVolumeKey(VolumeKey.UP, ButtonAction.Pad(Button.RB))
         editor.setVolumeKey(VolumeKey.DOWN, ButtonAction.Gyro(GyroButton.HOLD))
         assertEquals(VolumeKeys(ButtonAction.Pad(Button.RB), ButtonAction.Gyro(GyroButton.HOLD)), editor.s.draft.volumeKeys)
@@ -311,7 +307,7 @@ class LayoutEditorTest {
     fun stickTuningIsSetPerStickAndClamped() {
         val left = StickControl("l", at(300f, 250f), Side.LEFT, radius = 0.17f, grabRadius = 0.2f)
         val right = StickControl("r", at(700f, 250f), Side.RIGHT, radius = 0.17f, grabRadius = 0.2f)
-        val editor = editor(menu, left, right)
+        val editor = editor(corner, left, right)
         editor.tap(300f, 250f)
         editor.setStickDeadzone(0.2f)
         editor.setStickCurve(2f)
@@ -334,7 +330,7 @@ class LayoutEditorTest {
     @Test
     fun consecutiveDeadzoneStepsShareOneUndoStep() {
         val stick = StickControl("s", at(500f, 250f), Side.LEFT, radius = 0.17f, grabRadius = 0.2f)
-        val editor = editor(menu, stick)
+        val editor = editor(corner, stick)
         editor.tap(500f, 250f)
         editor.setStickDeadzone(0.1f)
         editor.setStickDeadzone(0.12f)
@@ -344,7 +340,7 @@ class LayoutEditorTest {
 
     @Test
     fun stickTuningLeavesOtherControlsAlone() {
-        val editor = editor(menu, a)
+        val editor = editor(corner, a)
         editor.tap(500f, 250f)
         editor.setStickDeadzone(0.2f)
         editor.setStickFloating(true)
@@ -354,11 +350,50 @@ class LayoutEditorTest {
 
     @Test
     fun hapticsIsSetForTheLayoutAndUndone() {
-        val editor = editor(menu)
+        val editor = editor(corner)
         assertTrue(editor.s.draft.haptics)
         editor.setHaptics(false)
         assertEquals(false, editor.s.draft.haptics)
         editor.undo()
         assertTrue(editor.s.draft.haptics)
+    }
+
+    @Test
+    fun firstGyroButtonIsWhileHeldAndAimsWithTheRightStick() {
+        val editor = editor(corner, a, b)
+        editor.add(NewControl.Gyro)
+        val added = editor.control(editor.s.selectedId!!) as ButtonControl
+        assertEquals(ButtonAction.Gyro(GyroButton.HOLD), added.action)
+        assertEquals("Gyro", added.label)
+        assertEquals(GyroSetup.DEFAULT_BINDINGS, editor.s.draft.gyro.bindings)
+        assertTrue(editor.s.issues.isEmpty())
+
+        editor.undo()
+        assertEquals(listOf("corner", "a", "b"), editor.s.draft.controls.map { it.id }, "one undo step")
+        assertTrue(editor.s.draft.gyro.bindings.isEmpty())
+    }
+
+    @Test
+    fun anotherGyroButtonTakesTheLayoutsModeAndKeepsItsSettings() {
+        val toggle = ButtonControl("t", at(800f, 400f), Shape.Circle(0.05f), ButtonAction.Gyro(GyroButton.TOGGLE), "Gyro I/O")
+        val trigger = GyroBinding.TriggerBinding(Side.LEFT, GyroAxis.VERTICAL)
+        var next = 0
+        val editor = LayoutEditor(
+            LayoutProfile("p", "Mine", listOf(corner, toggle), gyro = GyroSetup(listOf(trigger))),
+            screen, metrics, emptySet(),
+        ) { "n${next++}" }
+        editor.add(NewControl.Gyro)
+        assertEquals(ButtonAction.Gyro(GyroButton.TOGGLE), (editor.control("n0") as ButtonControl).action)
+        assertEquals(listOf(trigger), editor.s.draft.gyro.bindings)
+    }
+
+    @Test
+    fun aGyroModeInUseBlocksTheOthers() {
+        val used = listOf(ButtonAction.Gyro(GyroButton.RECENTER))
+        assertEquals(
+            setOf(ButtonAction.Gyro(GyroButton.HOLD), ButtonAction.Gyro(GyroButton.TOGGLE)),
+            blockedGyroModes(used),
+        )
+        assertEquals(emptySet(), blockedGyroModes(listOf(ButtonAction.Pad(Button.A))))
     }
 }

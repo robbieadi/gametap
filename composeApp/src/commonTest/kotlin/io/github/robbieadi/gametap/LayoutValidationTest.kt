@@ -5,7 +5,6 @@ import io.github.robbieadi.gametap.layout.Anchor
 import io.github.robbieadi.gametap.layout.ButtonAction
 import io.github.robbieadi.gametap.layout.GamepadControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.GyroAxis
 import io.github.robbieadi.gametap.layout.GyroBinding
@@ -31,10 +30,9 @@ import kotlin.test.assertTrue
 
 class LayoutValidationTest {
     private val screen = ScreenSize(width = 2000f, height = 1000f)
-    private val menu = MenuControl("menu", Position(Anchor.LEFT, 0.1f, 0.1f), Shape.Circle(0.05f))
 
     private fun profile(vararg controls: GamepadControl) =
-        LayoutProfile("p", "Test", listOf(menu) + controls)
+        LayoutProfile("p", "Test", controls.toList())
 
     private fun button(id: String, x: Float, y: Float, shape: Shape, anchor: Anchor = Anchor.LEFT) =
         ButtonControl(id, Position(anchor, x, y), shape, ButtonAction.Pad(Button.A), "A")
@@ -99,15 +97,6 @@ class LayoutValidationTest {
     fun controlPastTheEdgeIsOffScreen() {
         val issues = profile(button("a", 0.05f, 0.5f, Shape.Circle(0.1f))).validate(screen)
         assertEquals(listOf(LayoutIssue.OffScreen("a")), issues)
-    }
-
-    @Test
-    fun menuIsRequiredExactlyOnce() {
-        val none = LayoutProfile("p", "Test", emptyList()).validate(screen)
-        assertEquals(listOf(LayoutIssue.MenuCount(0)), none)
-
-        val second = menu.copy(id = "menu2", position = Position(Anchor.RIGHT, 0.1f, 0.1f))
-        assertEquals(listOf(LayoutIssue.MenuCount(2)), profile(second).validate(screen))
     }
 
     @Test
@@ -180,8 +169,15 @@ class LayoutValidationTest {
         assertEquals(emptySet(), default.screenIssues(ScreenSize(2220f, 1000f)).controlIds())
     }
 
+    /** With a gyro button, since the settings of a layout without one are not checked. */
     private fun gyro(vararg bindings: GyroBinding, deadzone: Float = 1f) =
-        profile().copy(gyro = GyroSetup(bindings.toList(), deadzone = deadzone)).validate(screen)
+        profile(gyroButton("g", GyroButton.HOLD, 0.5f)).copy(gyro = GyroSetup(bindings.toList(), deadzone = deadzone)).validate(screen)
+
+    @Test
+    fun gyroSettingsWithoutAGyroButtonAreNotChecked() {
+        val unused = GyroSetup(listOf(GyroBinding.StickBinding(Side.LEFT, horizontal = false, vertical = false)), deadzone = 10f)
+        assertEquals(emptyList(), profile().copy(gyro = unused).validate(screen))
+    }
 
     @Test
     fun gyroBindingsOnSeparateTargetsAreValid() {
@@ -221,14 +217,20 @@ class LayoutValidationTest {
         ButtonControl(id, Position(Anchor.RIGHT, 0.2f, y), Shape.Circle(0.05f), ButtonAction.Gyro(action), "")
 
     @Test
-    fun gyroToggleAndHoldTogetherAreReported() {
+    fun mixedGyroModesAreReported() {
         val issues = profile(
             gyroButton("t", GyroButton.TOGGLE, 0.2f),
             gyroButton("h", GyroButton.HOLD, 0.5f),
             gyroButton("r", GyroButton.RECENTER, 0.8f),
         ).validate(screen)
-        assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(listOf("t", "h"))), issues)
-        assertEquals(setOf("t", "h"), issues.controlIds())
+        assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(listOf("t", "h", "r"))), issues)
+        assertEquals(setOf("t", "h", "r"), issues.controlIds())
+    }
+
+    @Test
+    fun alwaysOnCannotBeMixedWithToggle() {
+        val issues = profile(gyroButton("t", GyroButton.TOGGLE, 0.2f), gyroButton("r", GyroButton.RECENTER, 0.8f)).validate(screen)
+        assertEquals(listOf(LayoutIssue.ConflictingGyroButtons(listOf("t", "r"))), issues)
     }
 
     @Test
@@ -268,5 +270,20 @@ class LayoutValidationTest {
         val badCurve = profile(stick.copy(curveExponent = 0.5f)).validate(screen)
         assertEquals(listOf(LayoutIssue.InvalidStickTuning("s")), badCurve)
         assertEquals(setOf("s"), badCurve.controlIds())
+    }
+
+    @Test
+    fun gyroModeComesFromTheGyroButtonsAndKeys() {
+        assertEquals(null, profile().gyroMode)
+        assertEquals(GyroButton.TOGGLE, profile(gyroButton("t", GyroButton.TOGGLE, 0.2f)).gyroMode)
+        assertEquals(
+            GyroButton.RECENTER,
+            profile().copy(volumeKeys = VolumeKeys(up = ButtonAction.Gyro(GyroButton.RECENTER))).gyroMode,
+        )
+        // An invalid mix from before modes were exclusive keeps working as toggle or hold.
+        assertEquals(
+            GyroButton.TOGGLE,
+            profile(gyroButton("t", GyroButton.TOGGLE, 0.2f), gyroButton("r", GyroButton.RECENTER, 0.8f)).gyroMode,
+        )
     }
 }

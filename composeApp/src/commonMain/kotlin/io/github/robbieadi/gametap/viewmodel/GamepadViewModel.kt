@@ -60,7 +60,7 @@ class GamepadViewModel(
 
     /** A toggle button has turned gyro on and it can run, which shows the button lit. */
     val gyroOn: StateFlow<Boolean> = combine(gyro.toggledOn, layout) { on, profile ->
-        on && motionSensor.isAvailable && profile.gyro.bindings.isNotEmpty()
+        on && profile.runsGyro
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** Every profile, for the in-game menu. */
@@ -139,9 +139,13 @@ class GamepadViewModel(
         tracker.releaseAll()
     }
 
+    /** Gyro needs a sensor, a gyro button or key, and something for tilting to drive. */
+    private val LayoutProfile.runsGyro: Boolean
+        get() = motionSensor.isAvailable && gyroMode != null && gyro.bindings.isNotEmpty()
+
     /** The sensor runs only while the gamepad is on screen and the profile uses gyro. */
     private fun updateSensor(profile: LayoutProfile) {
-        val wanted = shown && motionSensor.isAvailable && profile.gyro.bindings.isNotEmpty()
+        val wanted = shown && profile.runsGyro
         if (wanted == sensorRunning) return
         sensorRunning = wanted
         if (wanted) {

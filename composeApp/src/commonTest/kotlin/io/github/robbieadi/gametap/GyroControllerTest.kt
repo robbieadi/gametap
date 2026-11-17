@@ -44,6 +44,8 @@ class GyroControllerTest {
         gyro.setButtons(emptySet())
     }
 
+    private val alwaysOn = button(GyroButton.RECENTER)
+
     private fun started(vararg controls: GamepadControl) = apply {
         gyro.setLayout(profile(*controls))
         gyro.start()
@@ -51,7 +53,7 @@ class GyroControllerTest {
 
     @Test
     fun firstSampleIsNeutral() {
-        started()
+        started(alwaysOn)
         sample(30f)
         assertEquals(0f, rt, 0.001f)
         sample(40f)
@@ -60,7 +62,7 @@ class GyroControllerTest {
 
     @Test
     fun recenterMakesTheNextSampleNeutral() {
-        started()
+        started(alwaysOn)
         sample(0f)
         sample(20f)
         assertEquals(1f, rt, 0.001f)
@@ -141,16 +143,25 @@ class GyroControllerTest {
     }
 
     @Test
-    fun withoutAToggleOrHoldGyroIsAlwaysOn() {
-        started(button(GyroButton.RECENTER))
+    fun alwaysOnButtonKeepsGyroOn() {
+        started(alwaysOn)
         sample(0f)
         sample(20f)
         assertEquals(1f, rt, 0.001f)
     }
 
     @Test
-    fun otherButtonsDoNotNeedHold() {
+    fun withoutAGyroButtonThereIsNoGyro() {
         started(ButtonControl("a", Position(Anchor.LEFT, 0f, 0f), Shape.Circle(0.1f), ButtonAction.Pad(Button.A), "A"))
+        sample(0f)
+        sample(20f)
+        assertEquals(0f, rt, 0.001f)
+    }
+
+    @Test
+    fun alwaysOnOnAVolumeKeyAlsoWorks() {
+        gyro.setLayout(profile().copy(volumeKeys = VolumeKeys(up = ButtonAction.Gyro(GyroButton.RECENTER))))
+        gyro.start()
         sample(0f)
         sample(20f)
         assertEquals(1f, rt, 0.001f)
@@ -158,7 +169,7 @@ class GyroControllerTest {
 
     @Test
     fun displayRotationChangeRecenters() {
-        started()
+        started(alwaysOn)
         sample(0f, quarterTurns = 1)
         sample(180f, quarterTurns = 3)
         assertEquals(0f, rt, 0.001f)
@@ -168,7 +179,7 @@ class GyroControllerTest {
 
     @Test
     fun stopClearsOutputAndIgnoresLateSamples() {
-        started()
+        started(alwaysOn)
         sample(0f)
         sample(20f)
         assertEquals(1f, rt, 0.001f)
@@ -184,7 +195,7 @@ class GyroControllerTest {
 
     @Test
     fun accelerometerSamplesDriveTheSameOutput() {
-        started()
+        started(alwaysOn)
         gravity(0f)
         gravity(5f)
         assertEquals(0.5f, rt, 0.001f)
@@ -194,7 +205,7 @@ class GyroControllerTest {
 
     @Test
     fun aDifferentKindOfSampleBecomesNeutral() {
-        started()
+        started(alwaysOn)
         sample(0f)
         gravity(20f)
         assertEquals(0f, rt, 0.001f)

@@ -12,7 +12,6 @@ import io.github.robbieadi.gametap.layout.DpadDirection
 import io.github.robbieadi.gametap.layout.GamepadControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
 import io.github.robbieadi.gametap.layout.GamepadControl.DpadControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ThrottleControl
 import io.github.robbieadi.gametap.layout.GyroButton
@@ -42,13 +41,12 @@ class GamepadTouchTrackerTest {
     private val stick = StickControl("ls", at(200f, 250f), Side.LEFT, 0.2f, 0.3f)          // travel 100, grab r150
     private val throttle = ThrottleControl("rt", at(500f, 100f), Side.RIGHT, 0.1f, 0.1f, "RT") // x 450..550, y 50..150
     private val dpad = DpadControl("dpad", at(500f, 400f), 0.2f)                            // r100
-    private val menu = MenuControl("menu", at(40f, 40f), Shape.Circle(0.06f))               // r30
 
     private fun layoutOf(vararg controls: GamepadControl) = LayoutProfile("test", "Test", controls.toList())
 
     private val input = InputStateHolder()
     private var presses = 0
-    private val tracker = tracker(layoutOf(a, b, stick, throttle, dpad, menu))
+    private val tracker = tracker(layoutOf(a, b, stick, throttle, dpad))
     private val state get() = input.state.value
     private val view get() = tracker.view.value
 
@@ -124,7 +122,7 @@ class GamepadTouchTrackerTest {
 
     @Test
     fun floatingStickAnchorsAtTouchDown() {
-        tracker.setLayout(layoutOf(a, b, stick.copy(floating = true), throttle, dpad, menu))
+        tracker.setLayout(layoutOf(a, b, stick.copy(floating = true), throttle, dpad))
         tracker.down(1, 250f, 300f)
         assertEquals(0f, state.leftStick.x)
         assertEquals(TouchPoint(250f, 300f), view.sticks.getValue("ls").origin)
@@ -241,16 +239,6 @@ class GamepadTouchTrackerTest {
     }
 
     @Test
-    fun menuIsHeldButSendsNothing() {
-        tracker.down(1, 40f, 40f)
-        assertTrue(view.menuHeld)
-        assertEquals(GamepadState(), state)
-        assertEquals(0, presses)
-        tracker.move(1, 120f, 40f)
-        assertFalse(view.menuHeld, "sliding off cancels the hold")
-    }
-
-    @Test
     fun switchingLayoutsReleasesEverything() {
         tracker.down(1, 800f, 250f)
         tracker.setLayout(layoutOf(b))
@@ -263,7 +251,7 @@ class GamepadTouchTrackerTest {
     fun gyroButtonsAreReportedAndSendNothing() {
         val hold = button("gyro", 800f, 250f, ButtonAction.Gyro(GyroButton.HOLD))
         var gyroButtons: Set<GyroButton> = emptySet()
-        val tracker = GamepadTouchTracker(layoutOf(hold, menu), input, { presses++ }, { gyroButtons = it })
+        val tracker = GamepadTouchTracker(layoutOf(hold), input, { presses++ }, { gyroButtons = it })
             .apply { resize(1000f, 500f) }
 
         tracker.down(1, 800f, 250f)
@@ -275,7 +263,7 @@ class GamepadTouchTrackerTest {
         assertEquals(emptySet(), gyroButtons)
     }
 
-    private fun withKeys(keys: VolumeKeys) = tracker(layoutOf(a, menu).copy(volumeKeys = keys))
+    private fun withKeys(keys: VolumeKeys) = tracker(layoutOf(a).copy(volumeKeys = keys))
 
     @Test
     fun volumeKeySendsItsActionWhileHeld() {
@@ -319,14 +307,14 @@ class GamepadTouchTrackerTest {
         assertFalse(state.isPressed(Button.A))
 
         tracker.key(VolumeKey.UP, pressed = true)
-        tracker.setLayout(layoutOf(b, menu).copy(volumeKeys = keys))
+        tracker.setLayout(layoutOf(b).copy(volumeKeys = keys))
         assertFalse(state.isPressed(Button.A))
     }
 
     @Test
     fun volumeKeyCanHoldGyro() {
         var gyroButtons: Set<GyroButton> = emptySet()
-        val layout = layoutOf(menu).copy(volumeKeys = VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD)))
+        val layout = layoutOf().copy(volumeKeys = VolumeKeys(down = ButtonAction.Gyro(GyroButton.HOLD)))
         val tracker = GamepadTouchTracker(layout, input, onGyroButtons = { gyroButtons = it }).apply { resize(1000f, 500f) }
         tracker.key(VolumeKey.DOWN, pressed = true)
         assertEquals(setOf(GyroButton.HOLD), gyroButtons)
@@ -337,7 +325,7 @@ class GamepadTouchTrackerTest {
     @Test
     fun onlyTheFloatingStickAnchorsAtTouchDown() {
         val right = StickControl("rs", at(800f, 400f), Side.RIGHT, 0.2f, 0.18f) // grab r90
-        tracker.setLayout(layoutOf(stick.copy(floating = true), right, menu))
+        tracker.setLayout(layoutOf(stick.copy(floating = true), right))
         tracker.down(1, 250f, 300f)
         tracker.down(2, 820f, 400f)
         assertEquals(TouchPoint(250f, 300f), view.sticks.getValue("ls").origin)

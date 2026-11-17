@@ -1,5 +1,6 @@
 package io.github.robbieadi.gametap
 
+import io.github.robbieadi.gametap.layout.GyroSetup
 import io.github.robbieadi.gametap.layout.DefaultLayout
 import io.github.robbieadi.gametap.layout.LayoutJson
 import io.github.robbieadi.gametap.layout.LayoutStore
@@ -25,5 +26,12 @@ class DefaultLayoutTest {
         val store = LayoutStore(activeProfileId = DefaultLayout.PROFILE_ID, profiles = listOf(DefaultLayout.profile))
         val json = LayoutJson.encodeToString(LayoutStore.serializer(), store)
         assertEquals(store, LayoutJson.decodeFromString(LayoutStore.serializer(), json))
+    }
+
+    /** Gyro is added from the editor, so the built-in layout has no gyro button or settings. */
+    @Test
+    fun defaultHasNoGyro() {
+        assertEquals(null, DefaultLayout.profile.gyroMode)
+        assertEquals(GyroSetup(), DefaultLayout.profile.gyro)
     }
 }

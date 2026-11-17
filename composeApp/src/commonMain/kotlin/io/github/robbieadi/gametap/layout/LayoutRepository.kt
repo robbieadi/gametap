@@ -106,29 +106,8 @@ class LayoutRepository(
 
 private fun LayoutStore.toLayouts(): Layouts {
     val all = listOf(DefaultLayout.profile) +
-        profiles.filter { it.id != DefaultLayout.PROFILE_ID }.map { it.withExactlyOneMenu() }
+        profiles.filter { it.id != DefaultLayout.PROFILE_ID }
     return Layouts(all, all.firstOrNull { it.id == activeProfileId } ?: DefaultLayout.profile)
-}
-
-/**
- * Without a menu control the player cannot leave the gamepad screen, so a profile that lost it
- * (a bug, an edited file) gets the default one back. It goes last so it is drawn on top and wins
- * any touch it overlaps; the screen then flags the overlap. Extra menus are dropped.
- */
-internal fun LayoutProfile.withExactlyOneMenu(): LayoutProfile {
-    val menus = controls.filterIsInstance<GamepadControl.MenuControl>()
-    return when {
-        menus.size == 1 -> this
-        menus.size > 1 -> copy(controls = controls.filter { it !is GamepadControl.MenuControl || it === menus.first() })
-        else -> {
-            val template = DefaultLayout.profile.controls.filterIsInstance<GamepadControl.MenuControl>().single()
-            val taken = controls.map { it.id }.toSet()
-            val id = generateSequence(0) { it + 1 }
-                .map { if (it == 0) template.id else "${template.id}_$it" }
-                .first { it !in taken }
-            copy(controls = controls + template.copy(id = id))
-        }
-    }
 }
 
 @OptIn(ExperimentalUuidApi::class)

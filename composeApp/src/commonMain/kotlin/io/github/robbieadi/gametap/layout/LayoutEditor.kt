@@ -3,7 +3,6 @@ package io.github.robbieadi.gametap.layout
 import io.github.robbieadi.gametap.domain.Button
 import io.github.robbieadi.gametap.layout.GamepadControl.ButtonControl
 import io.github.robbieadi.gametap.layout.GamepadControl.DpadControl
-import io.github.robbieadi.gametap.layout.GamepadControl.MenuControl
 import io.github.robbieadi.gametap.layout.GamepadControl.StickControl
 import io.github.robbieadi.gametap.layout.GamepadControl.ThrottleControl
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +33,9 @@ sealed interface Guide {
 /** An entry in the editor's add palette. */
 sealed interface NewControl {
     data class Button(val action: ButtonAction) : NewControl
+
+    /** A button in the layout's gyro mode, or while held when it has none yet. */
+    data object Gyro : NewControl
 
     data class Throttle(val side: Side) : NewControl
 
@@ -190,7 +192,6 @@ class LayoutEditor(
     fun setLabel(label: String) = editSelected(key = "label:${mutableState.value.selectedId}") { control ->
         when (control) {
             is ButtonControl -> control.copy(label = label)
-            is MenuControl -> control.copy(label = label)
             is ThrottleControl -> control.copy(label = label)
             else -> control
         }
@@ -199,7 +200,6 @@ class LayoutEditor(
     fun setShape(round: Boolean) = editSelected { control ->
         when (control) {
             is ButtonControl -> control.copy(shape = control.shape.converted(round))
-            is MenuControl -> control.copy(shape = control.shape.converted(round))
             else -> control
         }
     }
@@ -303,21 +303,29 @@ class LayoutEditor(
             is NewControl.Throttle -> ThrottleControl(newId(), ORIGIN, kind.side, 0.10f, 0.12f, triggerLabel(kind.side))
             is NewControl.Stick -> StickControl(newId(), ORIGIN, kind.side, radius = 0.20f * STICK_BASE_RATIO, grabRadius = 0.20f)
             NewControl.Dpad -> DpadControl(newId(), ORIGIN, 0.17f)
+            NewControl.Gyro -> {
+                val action = ButtonAction.Gyro(draft.gyroMode ?: GyroButton.HOLD)
+                ButtonControl(newId(), ORIGIN, Shape.Circle(0.08f), action, defaultLabel(action))
+            }
         }
-        place(template)
+        // A first gyro button comes with something for tilting to drive, so it works at once.
+        place(template) { profile ->
+            if (kind == NewControl.Gyro && profile.gyro.bindings.isEmpty()) {
+                profile.copy(gyro = profile.gyro.copy(bindings = GyroSetup.DEFAULT_BINDINGS))
+            } else {
+                profile
+            }
+        }
     }
 
-    /** Copies the selected control into free space. The menu control cannot be copied. */
+    /** Copies the selected control into free space. */
     fun duplicate() {
         val control = mutableState.value.selected ?: return
-        if (control is MenuControl) return
         place(control.withId(newId()))
     }
 
-    /** Deletes the selected control. The menu control cannot be deleted. */
     fun delete() {
         val control = mutableState.value.selected ?: return
-        if (control is MenuControl) return
         edit { profile -> profile.copy(controls = profile.controls.filterNot { it.id == control.id }) }
         select(null)
     }
@@ -386,10 +394,11 @@ class LayoutEditor(
         publish(draft.copy(controls = draft.controls.map { if (it.id == control.id) control else it }), guides)
     }
 
-    private fun place(template: GamepadControl) {
+    /** Adds [template] in free space, together with any [alongside] change, as one undo step. */
+    private fun place(template: GamepadControl, alongside: (LayoutProfile) -> LayoutProfile = { it }) {
         val spot = freeSpot(template)
         val control = template.withPosition(positionAt(spot.first, spot.second, autoAnchor(spot.first)))
-        edit { it.copy(controls = it.controls + control) }
+        edit { alongside(it.copy(controls = it.controls + control)) }
         select(control.id)
     }
 
@@ -461,7 +470,6 @@ class LayoutEditor(
         val halfH = size(abs(y - cy))
         return when (this) {
             is ButtonControl -> copy(shape = shape.resized(radius, halfW, halfH))
-            is MenuControl -> copy(shape = shape.resized(radius, halfW, halfH))
             is StickControl -> copy(grabRadius = radius, radius = radius * STICK_BASE_RATIO)
             is ThrottleControl -> copy(halfW = halfW, halfH = halfH)
             is DpadControl -> copy(radius = radius)
@@ -560,7 +568,6 @@ private fun Area.shifted(by: Float): Area = when (this) {
 
 private fun GamepadControl.withPosition(position: Position): GamepadControl = when (this) {
     is ButtonControl -> copy(position = position)
-    is MenuControl -> copy(position = position)
     is StickControl -> copy(position = position)
     is ThrottleControl -> copy(position = position)
     is DpadControl -> copy(position = position)
@@ -568,7 +575,6 @@ private fun GamepadControl.withPosition(position: Position): GamepadControl = wh
 
 private fun GamepadControl.withId(id: String): GamepadControl = when (this) {
     is ButtonControl -> copy(id = id)
-    is MenuControl -> copy(id = id)
     is StickControl -> copy(id = id)
     is ThrottleControl -> copy(id = id)
     is DpadControl -> copy(id = id)
