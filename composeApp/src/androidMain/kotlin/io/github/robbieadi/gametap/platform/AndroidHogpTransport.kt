@@ -62,7 +62,10 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertising = false
     private var reportCharacteristic: BluetoothGattCharacteristic? = null
-    private val staticValues = HashMap<UUID, ByteArray>()
+
+    // By characteristic, not UUID: the input and output reports share the Report UUID.
+    private val staticValues = ArrayList<Pair<BluetoothGattCharacteristic, ByteArray>>()
+    private val reportReferences = ArrayList<Pair<BluetoothGattCharacteristic, ByteArray>>()
     private val pendingServices = ArrayDeque<BluetoothGattService>()
 
     private var host: BluetoothDevice? = null
@@ -91,6 +94,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
             server = gattServer
             advertiser = leAdvertiser
             staticValues.clear()
+            reportReferences.clear()
             pendingServices.clear()
             HogpProfile.services(descriptor).forEach { service ->
                 pendingServices.addLast(
@@ -152,8 +156,9 @@ class AndroidHogpTransport(context: Context) : HidTransport {
             permissions = permissions or
                 if (encrypted) BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED else BluetoothGattCharacteristic.PERMISSION_READ
         }
-        if (spec.writableWithoutResponse) {
-            properties = properties or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+        if (spec.writableWithoutResponse || spec.writable) {
+            if (spec.writableWithoutResponse) properties = properties or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+            if (spec.writable) properties = properties or BluetoothGattCharacteristic.PROPERTY_WRITE
             permissions = permissions or
                 if (encrypted) BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED else BluetoothGattCharacteristic.PERMISSION_WRITE
         }
@@ -167,12 +172,27 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         if (spec.notifies) {
             characteristic.addDescriptor(BluetoothGattDescriptor(uuid(HogpProfile.CLIENT_CONFIG), descriptorRead or descriptorWrite))
         }
-        if (spec.reportReference != null) {
+        spec.reportReference?.let {
             characteristic.addDescriptor(BluetoothGattDescriptor(uuid(HogpProfile.REPORT_REFERENCE), descriptorRead))
+            reportReferences += characteristic to it
         }
-        spec.value?.let { staticValues[characteristic.uuid] = it }
-        if (spec.uuid == HogpProfile.REPORT) reportCharacteristic = characteristic
+        spec.value?.let { staticValues += characteristic to it }
+        if (spec.uuid == HogpProfile.REPORT && spec.notifies) reportCharacteristic = characteristic
         return characteristic
+    }
+
+    /**
+     * The entry for [characteristic]. Android hands back the objects given to addService, so
+     * identity finds it; UUID and properties are the fallback, and they also tell the input report
+     * (notify) from the output report (write) apart.
+     */
+    private fun <T> List<Pair<BluetoothGattCharacteristic, T>>.valueFor(characteristic: BluetoothGattCharacteristic): T? =
+        (firstOrNull { it.first === characteristic }
+            ?: firstOrNull { it.first.uuid == characteristic.uuid && it.first.properties == characteristic.properties })?.second
+
+    private fun isInputReport(characteristic: BluetoothGattCharacteristic): Boolean {
+        val input = reportCharacteristic ?: return false
+        return characteristic === input || (characteristic.uuid == input.uuid && characteristic.properties == input.properties)
     }
 
     private fun startAdvertisingLocked() {
@@ -298,7 +318,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         ) {
             val gattServer = server ?: return
             val value = synchronized(lock) {
-                if (characteristic.uuid == reportCharacteristic?.uuid) latestReport else staticValues[characteristic.uuid]
+                if (isInputReport(characteristic)) latestReport else staticValues.valueFor(characteristic)
             }
             respond(gattServer, device, requestId, offset, HogpProfile.readFrom(value, offset))
         }
@@ -311,7 +331,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         ) {
             val gattServer = server ?: return
             val value = when (descriptor.uuid) {
-                uuid(HogpProfile.REPORT_REFERENCE) -> HogpProfile.inputReportReference
+                uuid(HogpProfile.REPORT_REFERENCE) -> synchronized(lock) { reportReferences.valueFor(descriptor.characteristic) }
                 uuid(HogpProfile.CLIENT_CONFIG) -> synchronized(lock) {
                     if (subscribed && device == host) {
                         BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE

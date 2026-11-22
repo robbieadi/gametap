@@ -27,6 +27,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import io.github.robbieadi.gametap.hid.HidReportEncoder
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
@@ -72,6 +73,16 @@ private class FakeTransport(initial: TransportState = TransportState.Connected("
     }
 }
 
+/** Offsets into the Xbox-layout report, see [HidReportEncoder]. */
+private const val LEFT_X = 0
+private const val LEFT_Y = 2
+private const val RIGHT_X = 4
+private const val LEFT_TRIGGER = 8
+private const val RIGHT_TRIGGER = 10
+private const val BUTTONS_LOW = 13
+
+private fun List<Int>.u16(offset: Int): Int = this[offset] or (this[offset + 1] shl 8)
+
 class ReportSenderTest {
     private val input = InputStateHolder()
     private var curves = mapOf(Side.LEFT to DeadzoneCurve(deadzone = 0f), Side.RIGHT to DeadzoneCurve(deadzone = 0f))
@@ -96,14 +107,14 @@ class ReportSenderTest {
         val transport = FakeTransport()
         transport.sent.test {
             startSender(transport)
-            assertEquals(0, awaitItem()[0])
+            assertEquals(0, awaitItem()[BUTTONS_LOW])
 
             advance(100)
             expectNoEvents()
 
             input.set(GamepadState(buttons = Button.A.mask))
             runCurrent()
-            assertEquals(1, awaitItem()[0])
+            assertEquals(1, awaitItem()[BUTTONS_LOW])
         }
     }
 
@@ -213,7 +224,7 @@ class ReportSenderTest {
         val transport = FakeTransport()
         transport.sent.test {
             startSender(transport)
-            assertEquals(128, awaitItem()[3])
+            assertEquals(HidReportEncoder.STICK_CENTER, awaitItem().u16(LEFT_X))
         }
         assertEquals(0.4f, input.state.value.leftStick.x)
     }
@@ -228,10 +239,10 @@ class ReportSenderTest {
             input.setMotion(GyroOutput(leftStick = Stick(0.5f, -0.5f), rightTrigger = 0.6f, leftTrigger = 0.4f))
             advance(8)
             val report = expectMostRecentItem()
-            assertEquals(255, report[3]) // 0.8 + 0.5, clamped
-            assertEquals(64, report[4]) // -0.5
-            assertEquals(102, report[7]) // gyro alone
-            assertEquals(153, report[8]) // max(0.2, 0.6)
+            assertEquals(65535, report.u16(LEFT_X)) // 0.8 + 0.5, clamped
+            assertEquals(16384, report.u16(LEFT_Y)) // -0.5
+            assertEquals(409, report.u16(LEFT_TRIGGER)) // gyro alone, 0.4
+            assertEquals(614, report.u16(RIGHT_TRIGGER)) // max(0.2, 0.6)
         }
     }
 
@@ -254,8 +265,8 @@ class ReportSenderTest {
         transport.sent.test {
             startSender(transport)
             val report = awaitItem()
-            assertEquals(128, report[3].toInt() and 0xFF, "inside the left stick's deadzone")
-            assertTrue((report[5].toInt() and 0xFF) > 128, "the right stick has none")
+            assertEquals(HidReportEncoder.STICK_CENTER, report.u16(LEFT_X), "inside the left stick's deadzone")
+            assertTrue(report.u16(RIGHT_X) > HidReportEncoder.STICK_CENTER, "the right stick has none")
         }
     }
 }

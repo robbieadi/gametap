@@ -16,6 +16,8 @@ class HogpCharacteristic(
     val readable: Boolean = false,
     val notifies: Boolean = false,
     val writableWithoutResponse: Boolean = false,
+    /** Accepts writes that the host waits to have acknowledged. */
+    val writable: Boolean = false,
     /** Served on reads. Null for the input report, whose value is the latest report. */
     val value: ByteArray? = null,
     /** Value of the Report Reference descriptor, for report characteristics only. */
@@ -58,11 +60,19 @@ object HogpProfile {
     /** bcdHID 0x0111, country 0, flags 0x02 (normally connectable). */
     val hidInformation: ByteArray = bytes(0x11, 0x01, 0x00, 0x02)
 
-    /** USB vendor ID source, pid.codes test IDs 1209:0001, version 1.0. Replace before release. */
-    val pnpId: ByteArray = bytes(0x02, 0x09, 0x12, 0x01, 0x00, 0x00, 0x01)
+    /**
+     * USB vendor ID source, then the Xbox Wireless Controller's IDs: Microsoft 045E, model 1914
+     * 0B13, version 0x0509. Windows binds its XInput driver (xinputhid) to these IDs, and SDL,
+     * Linux and macOS pick their Xbox drivers by them. Changing them makes hosts treat Gametap as a
+     * generic HID gamepad again.
+     */
+    val pnpId: ByteArray = bytes(0x02, 0x5E, 0x04, 0x13, 0x0B, 0x09, 0x05)
 
     /** Report ID, then report type 0x01 for input. */
     val inputReportReference: ByteArray = bytes(HidDescriptor.REPORT_ID, 0x01)
+
+    /** Report ID, then report type 0x02 for output. */
+    val outputReportReference: ByteArray = bytes(HidDescriptor.OUTPUT_REPORT_ID, 0x02)
 
     /** Report protocol, not boot protocol. */
     private val reportProtocol: ByteArray = bytes(0x01)
@@ -82,6 +92,17 @@ object HogpProfile {
                     readable = true,
                     notifies = true,
                     reportReference = inputReportReference,
+                ),
+                // Rumble. The Report Map declares it, so it gets a characteristic like the real
+                // controller's; what hosts write is acknowledged and ignored.
+                HogpCharacteristic(
+                    REPORT,
+                    HogpAccess.Encrypted,
+                    readable = true,
+                    writable = true,
+                    writableWithoutResponse = true,
+                    value = ByteArray(HidDescriptor.OUTPUT_REPORT_SIZE),
+                    reportReference = outputReportReference,
                 ),
                 HogpCharacteristic(HID_CONTROL_POINT, HogpAccess.Encrypted, writableWithoutResponse = true),
                 HogpCharacteristic(

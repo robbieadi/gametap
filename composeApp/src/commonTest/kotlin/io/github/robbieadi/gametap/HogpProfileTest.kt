@@ -18,6 +18,9 @@ class HogpProfileTest {
     private val hid = services.first()
 
     private fun characteristic(uuid: Int) = services.flatMap { it.characteristics }.single { it.uuid == uuid }
+    private val reports = hid.characteristics.filter { it.uuid == HogpProfile.REPORT }
+    private val inputReport = reports.single { it.notifies }
+    private val outputReport = reports.single { !it.notifies }
 
     @Test
     fun hidServiceComesFirstThenDeviceInfoAndBattery() {
@@ -29,6 +32,7 @@ class HogpProfileTest {
             listOf(
                 HogpProfile.HID_INFORMATION,
                 HogpProfile.REPORT_MAP,
+                HogpProfile.REPORT,
                 HogpProfile.REPORT,
                 HogpProfile.HID_CONTROL_POINT,
                 HogpProfile.PROTOCOL_MODE,
@@ -46,8 +50,7 @@ class HogpProfileTest {
 
     @Test
     fun inputReportNotifiesWithAReportReferenceAndHasNoFixedValue() {
-        val report = characteristic(HogpProfile.REPORT)
-        assertTrue(report.notifies)
+        val report = inputReport
         assertTrue(report.readable)
         assertEquals(HogpAccess.Encrypted, report.access)
         assertNull(report.value)
@@ -55,15 +58,27 @@ class HogpProfileTest {
     }
 
     @Test
-    fun onlyTheInputReportHasAReportReference() {
+    fun outputReportTakesWritesAndReadsBackZeroes() {
+        val report = outputReport
+        assertTrue(report.writable)
+        assertTrue(report.writableWithoutResponse)
+        assertTrue(report.readable)
+        assertEquals(HogpAccess.Encrypted, report.access)
+        assertContentEquals(ByteArray(HidDescriptor.OUTPUT_REPORT_SIZE), report.value)
+        assertContentEquals(byteArrayOf(HidDescriptor.OUTPUT_REPORT_ID.toByte(), 0x02), report.reportReference)
+    }
+
+    @Test
+    fun onlyTheReportsHaveAReportReference() {
         val withReference = services.flatMap { it.characteristics }.filter { it.reportReference != null }
-        assertEquals(listOf(HogpProfile.REPORT), withReference.map { it.uuid })
+        assertEquals(listOf(HogpProfile.REPORT, HogpProfile.REPORT), withReference.map { it.uuid })
     }
 
     @Test
     fun fixedValues() {
         assertContentEquals(byteArrayOf(0x11, 0x01, 0x00, 0x02), characteristic(HogpProfile.HID_INFORMATION).value)
-        assertContentEquals(byteArrayOf(0x02, 0x09, 0x12, 0x01, 0x00, 0x00, 0x01), characteristic(HogpProfile.PNP_ID).value)
+        // USB source, Microsoft 045E, Xbox Wireless Controller 0B13, version 0x0509: the IDs xinputhid binds to.
+        assertContentEquals(byteArrayOf(0x02, 0x5E, 0x04, 0x13, 0x0B, 0x09, 0x05), characteristic(HogpProfile.PNP_ID).value)
         assertContentEquals("Gametap".encodeToByteArray(), characteristic(HogpProfile.MANUFACTURER_NAME).value)
         assertContentEquals(byteArrayOf(100), characteristic(HogpProfile.BATTERY_LEVEL).value)
         assertContentEquals(byteArrayOf(0x01), characteristic(HogpProfile.PROTOCOL_MODE).value)
@@ -78,9 +93,9 @@ class HogpProfileTest {
     }
 
     @Test
-    fun everyReadableCharacteristicExceptTheReportHasAValue() {
+    fun everyReadableCharacteristicExceptTheInputReportHasAValue() {
         services.flatMap { it.characteristics }
-            .filter { it.readable && it.uuid != HogpProfile.REPORT }
+            .filter { it.readable && it !== inputReport }
             .forEach { assertNotNull(it.value, "0x${it.uuid.toString(16)}") }
     }
 

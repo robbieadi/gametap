@@ -30,6 +30,7 @@ import platform.CoreBluetooth.CBAttributePermissionsWriteEncryptionRequired
 import platform.CoreBluetooth.CBAttributePermissionsWriteable
 import platform.CoreBluetooth.CBCentral
 import platform.CoreBluetooth.CBCharacteristic
+import platform.CoreBluetooth.CBCharacteristicPropertyWrite
 import platform.CoreBluetooth.CBCharacteristicPropertyNotify
 import platform.CoreBluetooth.CBCharacteristicPropertyNotifyEncryptionRequired
 import platform.CoreBluetooth.CBCharacteristicPropertyRead
@@ -81,7 +82,8 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     private var manager: CBPeripheralManager? = null
     private var reportCharacteristic: CBMutableCharacteristic? = null
     private var reportMap: ByteArray = ByteArray(0)
-    private val staticValues = HashMap<String, ByteArray>()
+    // By characteristic, not UUID: the input and output reports share the Report UUID.
+    private val staticValues = ArrayList<Pair<CBMutableCharacteristic, ByteArray>>()
     private val pendingServices = HashSet<String>()
 
     private var latestReport: ByteArray = HidReportEncoder.encode(GamepadState())
@@ -153,8 +155,9 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
             permissions = permissions or
                 if (encrypted) CBAttributePermissionsReadEncryptionRequired else CBAttributePermissionsReadable
         }
-        if (spec.writableWithoutResponse) {
-            properties = properties or CBCharacteristicPropertyWriteWithoutResponse
+        if (spec.writableWithoutResponse || spec.writable) {
+            if (spec.writableWithoutResponse) properties = properties or CBCharacteristicPropertyWriteWithoutResponse
+            if (spec.writable) properties = properties or CBCharacteristicPropertyWrite
             permissions = permissions or
                 if (encrypted) CBAttributePermissionsWriteEncryptionRequired else CBAttributePermissionsWriteable
         }
@@ -167,10 +170,14 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         spec.reportReference?.let {
             characteristic.setDescriptors(listOf(CBMutableDescriptor(cbUuid(HogpProfile.REPORT_REFERENCE), it.toNSData())))
         }
-        spec.value?.let { staticValues[characteristic.UUID.UUIDString] = it }
-        if (spec.uuid == HogpProfile.REPORT) reportCharacteristic = characteristic
+        spec.value?.let { staticValues += characteristic to it }
+        if (spec.uuid == HogpProfile.REPORT && spec.notifies) reportCharacteristic = characteristic
         return characteristic
     }
+
+    /** Same object first; UUID and properties tell the input report (notify) from the output report. */
+    private fun sameCharacteristic(a: CBCharacteristic, b: CBCharacteristic): Boolean =
+        a === b || (a.UUID.UUIDString == b.UUID.UUIDString && a.properties == b.properties)
 
     private fun startAdvertising(peripheral: CBPeripheralManager) {
         peripheral.startAdvertising(
@@ -239,8 +246,13 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
 
     override fun peripheralManager(peripheral: CBPeripheralManager, didReceiveReadRequest: CBATTRequest) {
         val request = didReceiveReadRequest
-        val uuid = request.characteristic.UUID.UUIDString
-        val value = if (uuid == reportCharacteristic?.UUID?.UUIDString) latestReport else staticValues[uuid]
+        val target = request.characteristic
+        val input = reportCharacteristic
+        val value = if (input != null && sameCharacteristic(target, input)) {
+            latestReport
+        } else {
+            (staticValues.firstOrNull { it.first === target } ?: staticValues.firstOrNull { sameCharacteristic(it.first, target) })?.second
+        }
         when (val read = HogpProfile.readFrom(value, request.offset.toInt())) {
             is HogpRead.Value -> {
                 request.value = read.bytes.toNSData()

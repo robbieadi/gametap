@@ -1,8 +1,8 @@
 # Gametap
 
-Turns an Android or iOS phone into a Bluetooth gamepad. The phone presents itself as a
-standard HID gamepad over Bluetooth Low Energy (HID over GATT), so the host needs no companion
-app and no driver.
+Turns an Android or iOS phone into a Bluetooth gamepad. The phone presents itself as an Xbox
+Wireless Controller over Bluetooth Low Energy (HID over GATT), so the host needs no companion
+app and no driver, and Windows gives it XInput. See [Xbox identity](#xbox-identity).
 
 Built with Kotlin Multiplatform and Compose Multiplatform. The HID descriptor, report
 encoding, input handling and UI are all shared; platform code only moves bytes over the radio.
@@ -12,12 +12,12 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 | Part | State |
 |------|-------|
 | Shared code (HID, input, sender, connection logic) | Unit tested |
-| Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE, but on classic Bluetooth, before the move to Low Energy |
-| Multi-touch | Unit tested in the tracker; used in a game on the Redmi Pad SE (classic Bluetooth), not checked control by control |
+| Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE over classic Bluetooth, and again over Low Energy with a Windows host. **Not rechecked on Linux since Gametap took the Xbox identity**, see [Xbox identity](#xbox-identity) |
+| Multi-touch | Unit tested in the tracker. On the Redmi Pad SE over Low Energy, up to five fingers at once (both sticks, D-pad, a trigger and buttons) each held their own control while others were pressed, moved and released |
 | Leaving the app and coming back | Tested on the Redmi Pad SE, see [Using it](#using-it) |
 | Volume keys | Used on a Redmi Pad SE; about 150 ms slower than on-screen buttons, see [Volume keys](#volume-keys) |
 | Gyro | Tilt math and controls unit tested. iOS reader checked against CoreMotion's gravity on an iPhone 13 mini; **tilting not yet tried on a device** on either platform |
-| Windows hosts | **Not yet tested** |
+| Windows hosts | Windows 11 with an Intel adapter. The Redmi Pad SE pairs as an Xbox Wireless Controller and gets Windows' XInput driver. Every control arrives correctly through XInput, DirectInput (`joy.cpl`) and Steam's SDL, which recognizes it without setup, but **Windows does not reconnect by itself**, see [Windows hosts](#windows-hosts). The iPhone has not been tried since the change |
 | macOS host | An iPhone pairs. Android not tried |
 | iOS as a gamepad | Runs on an iPhone. Pairs with Linux and macOS, and Linux creates the gamepad device. Buttons not checked one at a time, see [iOS risks](#ios-risks) |
 
@@ -123,13 +123,11 @@ Android only. iOS has no public API for the volume keys: the usual workaround wa
 volume, which cannot tell a hold from a press and still changes the volume. The editor hides
 **Keys** on iOS.
 
-To check the result on a host, use Windows `joy.cpl`, <https://hardwaretester.com/gamepad>,
-Steam controller settings, or `evtest` / `jstest` on Linux.
+To check the result on a host, use <https://hardwaretester.com/gamepad>, Steam controller
+settings, or `evtest` / `jstest` on Linux.
 
 ## Known limitations
 
-- **XInput-only games.** Hosts see a generic HID gamepad (DirectInput-style on Windows). Steam,
-  emulators and most modern games accept it. XInput-only games need Steam Input or a mapper.
 - **Android phones that cannot advertise over Bluetooth Low Energy.** Mostly older or budget
   devices. The app then says the phone cannot act as a controller.
 - **No connection in the background on Android.** Games may pause or report a disconnected
@@ -138,9 +136,29 @@ Steam controller settings, or `evtest` / `jstest` on Linux.
   stop it anyway.
 - **Descriptor changes.** Hosts cache the descriptor. Remove the device from the host's Bluetooth
   settings, forget the host on the phone, and pair again after any change.
-- **Placeholder PnP ID.** `HogpProfile.pnpId` uses pid.codes test values (1209:0001). Replace it
-  before release.
+- **No rumble, no Share button.** Hosts can send rumble, which is accepted and ignored. The Share
+  button is always released.
 - **The host may show the phone's own name and ID.** See [Linux hosts](#linux-hosts).
+
+### Xbox identity
+
+Gametap reports Microsoft's IDs for the Xbox Wireless Controller, model 1914 (`045E:0B13`,
+version `0x0509`), in its PnP ID, and that controller's Report Map and report layout. There is no
+other way to XInput over Bluetooth: Windows' `xinputhid.inf` binds the XInput driver to a fixed
+list of Microsoft IDs, and the Bluetooth Low Energy entries are all Xbox controllers. Hosts then
+use their Xbox drivers: XInput on Windows, SDL's Xbox driver in Steam, and on Linux and macOS
+whatever they use for that controller. Commercial controllers do the same; a Flydigi Vader 5 Pro in
+Bluetooth mode reports `045E:02E0` (Xbox One S).
+
+- **The report must stay byte for byte the same.** Hosts' Xbox drivers read fields at fixed
+  offsets. The descriptor comes from ESP32-BLE-CompositeHID (MIT), and the offsets match SDL's
+  Xbox Bluetooth parser; `HidDescriptorTest` and `HidReportEncoderTest` pin both.
+- **The IDs are Microsoft's.** USB-IF rules reserve a vendor ID to the company it is assigned to,
+  and app stores may treat presenting as another company's hardware as misrepresentation. Avoid
+  Xbox names and logos in the app and its store listing.
+- **Not yet checked on Linux, macOS or with an iPhone.** Linux's and macOS's handling of an Xbox
+  controller that is a phone, including BlueZ taking the IDs from the phone's own record, see
+  [Linux hosts](#linux-hosts), is untested.
 
 ### Linux hosts
 
@@ -182,6 +200,35 @@ These were found with BlueZ 5.87. Other desktops and BlueZ versions may differ.
   connections, so Steam may treat it as a new controller. Apps cannot change this; the fix would
   be in BlueZ.
 
+### Windows hosts
+
+These were found on Windows 11 with an Intel adapter and a Redmi Pad SE, reading the gamepad
+through XInput, Windows.Gaming.Input, winmm (what `joy.cpl` shows) and the SDL 3.5 that Steam
+ships.
+
+- **It is an Xbox controller to Windows.** Add the phone in Bluetooth settings and confirm the
+  code on both sides. Windows loads its XInput driver for it ("Bluetooth LE XINPUT compatible
+  input device", `xinputhid`), and Windows.Gaming.Input counts it as an Xbox `Gamepad`.
+- **XInput reads every control.** Buttons, D-pad with diagonals, analog triggers (0 to 255) and
+  both sticks to full travel, checked one at a time. As with any Xbox controller, XInput does not
+  report the Home (Xbox) button; Windows keeps it for the Game Bar.
+- **Steam recognizes it without setup.** SDL names it "Xbox Series X Controller" with its built-in
+  mapping, and reads every control, including Home and analog triggers.
+- **DirectInput works in the foreground.** `joy.cpl` shows every control, with the layout every
+  Xbox controller has there: five axes, both triggers sharing one (Z) in opposite directions, so
+  DirectInput games cannot tell both pulled from neither. A background program reading winmm got
+  no input while XInput did, so test with the window in front.
+- **Windows does not reconnect by itself.** After leaving Gametap and coming back, or after
+  **Stop** and **Start gamepad**, the phone advertised and Windows saw it, but did not connect
+  within 60 s to 3 minutes, in three tries. A program asking Windows for the phone's GATT services
+  (`BluetoothLEDevice.GetGattServicesAsync`) connected it in about 7 s, and the gamepad came back,
+  but 6 of 9 such attempts failed with "Unreachable". Windows follows the phone's
+  changing private address, so that is not the cause.
+- **Leaving Gametap removes the gamepad from Windows.** Gametap removes its GATT services while
+  Windows is still connected, so Windows rereads the phone's services, finds no HID service and
+  removes the gamepad device. When the link drops with the services still there, for example when
+  the phone's Bluetooth is turned off, Windows keeps the device; it still did not reconnect.
+
 ## Latency
 
 Measured against a Linux PC from injected presses of A (`input motionevent` over adb, 0.7 s
@@ -198,6 +245,11 @@ Every press arrived.
 | Galaxy A54 | Classic, before the move | 30 | 391 to 709 ms | Phone connected to the PC |
 | Galaxy A54 | Classic, before the move | 30 | 31 to 36 ms | PC connected to the phone |
 | Redmi Pad SE | Classic, before the move | 30 | 22 to 49 ms | |
+| Redmi Pad SE | Low Energy, Windows host | 30 | 52 to 71 ms | Mostly within ±15 ms; one press per run 36 to 55 ms late. Measured differently, see below |
+
+**Windows.** The Windows run injected presses through a virtual touchscreen (`uinput`) on a fixed
+700 ms schedule and compared each report's arrival on the PC with that schedule, so the spread
+also includes any jitter in the injection. Every press arrived.
 
 **Why Low Energy.** Classic Bluetooth HID puts an idle link into sniff mode, a power saving state
 where the radio only wakes at intervals. Samsung phones let it sleep for up to 750 ms, and kept
@@ -229,21 +281,24 @@ notification in flight, so a newer report replaces one still waiting to go out.
 
 ## Axis mapping
 
-| Control | HID usage |
-|---------|-----------|
-| Left stick | X, Y |
-| Right stick | Z, Rz |
-| Left trigger | Brake |
-| Right trigger | Accelerator |
+Input report 1 is the Xbox Wireless Controller's, 16 bytes after the report ID, little-endian. Do
+not change it: hosts' Xbox drivers read it by offset, see [Xbox identity](#xbox-identity).
 
-Button bits follow the slots Linux and Android assign, so the gaps are required:
+| Bytes | Field | HID usage | Values |
+|-------|-------|-----------|--------|
+| 0-3 | Left stick X, Y | X, Y | 0 to 65535, center 32768 |
+| 4-7 | Right stick X, Y | Z, Rz | 0 to 65535, center 32768 |
+| 8-9 | Left trigger | Brake | 0 to 1023 |
+| 10-11 | Right trigger | Accelerator | 0 to 1023 |
+| 12 | D-pad | Hat switch | 1 to 8 clockwise from up, 0 released |
+| 13-14 | Buttons | Buttons 1 to 15 | bits below |
+| 15 | Share | Consumer Record | always 0 |
 
 | Bit | 0 | 1 | 3 | 4 | 6 | 7 | 10 | 11 | 12 | 13 | 14 |
 |-----|---|---|---|---|---|---|----|----|----|----|----|
-| Button | A | B | X | Y | LB | RB | Select | Start | Home | L3 | R3 |
+| Button | A | B | X | Y | LB | RB | Select (View) | Start (Menu) | Home (Xbox) | L3 | R3 |
 
-Do not put the triggers on Rx/Ry. SDL on Linux, which Steam uses, reads Rx/Ry as the right stick
-when they exist and then reads Z/Rz as the triggers, which crosses the two controls.
+Output report 3 carries rumble (four magnitudes, 0 to 100). Gametap acknowledges and ignores it.
 
 ## iOS risks
 
@@ -255,7 +310,9 @@ with the same layout as Android. What has been seen on an iPhone so far:
 - `CBMutableDescriptor` is documented to accept only two descriptor types. The Report Reference
   descriptor (`0x2908`) is neither, but creating it did not throw and the service was published.
 - CoreBluetooth advertises only a name and service UUIDs, so gamepad appearance (`0x03C4`) cannot
-  be advertised. Linux and macOS paired anyway; Windows is untested.
+  be advertised. Linux, macOS and Windows paired anyway, and Windows created the gamepad device;
+  its controls were not checked on Windows. All of this was before the Xbox identity, which adds
+  a second Report characteristic (the output report); iOS has not run it yet.
 - iOS does not reveal the host name, so the status shows a short identifier instead.
 
 Still to check on an iPhone: every control one at a time, and latency. If iOS refuses the
