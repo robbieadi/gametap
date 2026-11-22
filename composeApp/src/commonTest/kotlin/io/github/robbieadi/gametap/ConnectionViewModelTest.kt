@@ -26,10 +26,15 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-private class StartingTransport(override val stopsInBackground: Boolean = true) : HidTransport {
+private class StartingTransport : HidTransport {
     override val state = MutableStateFlow<TransportState>(TransportState.Idle)
     var starts = 0
     var stops = 0
+    val foregroundCalls = mutableListOf<Boolean>()
+
+    override fun setForeground(foreground: Boolean) {
+        foregroundCalls += foreground
+    }
 
     override suspend fun start(descriptor: ByteArray) {
         starts++
@@ -97,18 +102,29 @@ class ConnectionViewModelTest {
     }
 
     @Test
-    fun stopsAfterTwoSecondsInTheBackgroundAndRestartsOnReturn() = runTest(dispatcher) {
+    fun keepsTheHostInTheBackgroundAndTellsTheTransport() = runTest(dispatcher) {
         val transport = StartingTransport()
         val viewModel = playing(transport)
 
         viewModel.onAppVisible(false)
-        advanceTimeBy(1_900)
+        advanceTimeBy(60_000)
         runCurrent()
-        assertEquals(0, transport.stops, "must wait before stopping")
+        assertEquals(0, transport.stops)
+        assertEquals(TransportState.Connected("host"), transport.state.value)
 
-        advanceTimeBy(200)
+        viewModel.onAppVisible(true)
         runCurrent()
-        assertEquals(1, transport.stops)
+        assertEquals(1, transport.starts)
+        assertEquals(listOf(true, false, true), transport.foregroundCalls)
+    }
+
+    @Test
+    fun dropWhileAwayIsRestartedOnReturn() = runTest(dispatcher) {
+        val transport = StartingTransport()
+        val viewModel = playing(transport)
+
+        viewModel.onAppVisible(false)
+        transport.drops()
         advanceTimeBy(10_000)
         runCurrent()
         assertEquals(1, transport.starts, "must not restart while away")
@@ -117,34 +133,6 @@ class ConnectionViewModelTest {
         runCurrent()
         assertEquals(2, transport.starts)
         assertEquals(TransportState.Advertising, transport.state.value)
-    }
-
-    @Test
-    fun quickReturnKeepsTheHost() = runTest(dispatcher) {
-        val transport = StartingTransport()
-        val viewModel = playing(transport)
-
-        viewModel.onAppVisible(false)
-        advanceTimeBy(1_000)
-        viewModel.onAppVisible(true)
-        advanceTimeBy(10_000)
-        runCurrent()
-
-        assertEquals(0, transport.stops)
-        assertEquals(TransportState.Connected("host"), transport.state.value)
-    }
-
-    @Test
-    fun transportThatKeepsRunningIsLeftAloneInTheBackground() = runTest(dispatcher) {
-        val transport = StartingTransport(stopsInBackground = false)
-        val viewModel = playing(transport)
-
-        viewModel.onAppVisible(false)
-        advanceTimeBy(10_000)
-        runCurrent()
-
-        assertEquals(0, transport.stops)
-        assertEquals(TransportState.Connected("host"), transport.state.value)
     }
 
     @Test

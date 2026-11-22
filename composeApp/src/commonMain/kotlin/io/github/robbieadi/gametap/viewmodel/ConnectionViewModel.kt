@@ -10,7 +10,6 @@ import io.github.robbieadi.gametap.platform.TransportState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,12 +27,11 @@ class ConnectionViewModel(
     private val mutablePermissionDenied = MutableStateFlow(false)
     val permissionDenied: StateFlow<Boolean> = mutablePermissionDenied.asStateFlow()
 
-    // True from Start until Stop. A transport that stops in the background, or one that drops for
-    // another reason, is restarted on return; this tells that apart from the user stopping.
+    // True from Start until Stop. A transport that drops, for example when Bluetooth is turned off,
+    // is restarted while the app is visible; this tells that apart from the user stopping.
     private var wantsRunning = false
     private var isVisible = false
     private var startJob: Job? = null
-    private var backgroundStopJob: Job? = null
 
     init {
         viewModelScope.launch(Dispatchers.Default) { sender.run() }
@@ -47,20 +45,15 @@ class ConnectionViewModel(
         launchStart()
     }
 
-    /** Call when the app comes to the foreground (true) and leaves it (false). */
+    /**
+     * Call when the app comes to the foreground (true) and leaves it (false). The gamepad stays
+     * connected while the app is away: stopping it removed the HID service from a host that was
+     * still connected, and Windows then deleted the gamepad and did not reconnect.
+     */
     fun onAppVisible(visible: Boolean) {
         isVisible = visible
-        backgroundStopJob?.cancel()
-        if (visible) {
-            restartIfDropped()
-        } else if (transport.stopsInBackground) {
-            // A short delay, so a quick look at a notification does not drop the host.
-            backgroundStopJob = viewModelScope.launch {
-                delay(BACKGROUND_STOP_DELAY_MS)
-                startJob?.cancel()
-                transport.stop()
-            }
-        }
+        transport.setForeground(visible)
+        if (visible) restartIfDropped()
     }
 
     /** A paired host reconnects by itself once the transport advertises again. */
@@ -84,16 +77,10 @@ class ConnectionViewModel(
     fun stop() {
         wantsRunning = false
         startJob?.cancel()
-        backgroundStopJob?.cancel()
         viewModelScope.launch { transport.stop() }
     }
 
     override fun onCleared() {
         appScope.launch { transport.stop() }
-    }
-
-    private companion object {
-        /** About when Android used to drop classic Bluetooth HID after the app left the screen. */
-        const val BACKGROUND_STOP_DELAY_MS = 2_000L
     }
 }

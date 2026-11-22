@@ -1,6 +1,7 @@
 package io.github.robbieadi.gametap.platform
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -12,11 +13,15 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothStatusCodes
-import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.BluetoothLeAdvertiser
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
@@ -54,13 +59,11 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     private val mutableState = MutableStateFlow<TransportState>(TransportState.Idle)
     override val state: StateFlow<TransportState> = mutableState.asStateFlow()
 
-    // A GATT server would keep running in the background. Stopping keeps the behaviour users had
-    // with classic HID, which Android dropped about 2 s after the app left the screen.
-    override val stopsInBackground: Boolean get() = true
-
     private var server: BluetoothGattServer? = null
     private var advertiser: BluetoothLeAdvertiser? = null
     private var advertising = false
+    private var advertisingSet: AdvertisingSet? = null
+    private var advertisingSetStarting = false
     private var reportCharacteristic: BluetoothGattCharacteristic? = null
 
     // By characteristic, not UUID: the input and output reports share the Report UUID.
@@ -77,10 +80,18 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     // Android allows one notification in flight; onNotificationSent confirms each one.
     private val reports = LatestReportQueue(waitsForCompletion = true, trySend = ::notifyHost)
 
+    // While the app is away the host stays connected, but nothing new is invited: no advertising.
+    private var foreground = true
+
     override suspend fun start(descriptor: ByteArray) {
         synchronized(lock) {
             if (server != null) return
             val adapter = manager?.adapter
+            if (adapter != null && !adapter.isEnabled) {
+                // Android has no advertiser while the radio is off, which would read as unsupported.
+                mutableState.value = TransportState.Error(BLUETOOTH_OFF)
+                return
+            }
             val leAdvertiser = adapter?.bluetoothLeAdvertiser
             if (adapter == null || leAdvertiser == null || !adapter.isMultipleAdvertisementSupported) {
                 mutableState.value = TransportState.Unsupported
@@ -108,6 +119,11 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         }
     }
 
+    /**
+     * Only for Stop. The host then sees the HID service disappear, and Windows deletes the gamepad
+     * until the next connection. Android has no way to drop the link first: it stays up while this
+     * app's GATT server is open, and closing the server removes the services.
+     */
     override suspend fun stop() {
         synchronized(lock) {
             val gattServer = server ?: return
@@ -116,13 +132,78 @@ class AndroidHogpTransport(context: Context) : HidTransport {
             host?.let(gattServer::cancelConnection)
             gattServer.clearServices()
             gattServer.close()
-            server = null
-            advertiser = null
-            host = null
-            subscribed = false
-            reportCharacteristic = null
-            reports.reset()
+            releaseLocked()
             mutableState.value = TransportState.Idle
+        }
+    }
+
+    /**
+     * Away, the host stays connected with every control released (the gamepad screen does that),
+     * and the link asks for a slower, cheaper interval. Back in front, it asks for the fast one
+     * again, or advertises if the host left meanwhile.
+     */
+    override fun setForeground(foreground: Boolean) {
+        synchronized(lock) {
+            if (this.foreground == foreground) return
+            this.foreground = foreground
+            if (server == null) return
+            if (host == null) {
+                if (foreground) startAdvertisingLocked() else stopAdvertisingLocked()
+            } else {
+                val priority = if (foreground) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER
+                val requested = priorityClient?.requestConnectionPriority(priority)
+                Log.d(TAG, "${if (foreground) "foreground" else "background"}, connection priority $priority requested: $requested")
+            }
+        }
+    }
+
+    /** Forgets the server and the host. The caller sets the state. */
+    private fun releaseLocked() {
+        server = null
+        advertiser = null
+        advertising = false
+        host = null
+        subscribed = false
+        reportCharacteristic = null
+        reports.reset()
+    }
+
+    /**
+     * Without this the app kept showing the last state, such as connected, after Bluetooth was
+     * turned off. The stack drops the server and links itself; coming back on returns to Idle,
+     * which restarts the gamepad if it was running.
+     */
+    private val adapterReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> synchronized(lock) {
+                    stopAdvertisingLocked()
+                    dropAdvertisingSetLocked()
+                    val gattServer = server ?: return
+                    Log.d(TAG, "Bluetooth turning off")
+                    closePriorityClientLocked()
+                    gattServer.close()
+                    releaseLocked()
+                    mutableState.value = TransportState.Error(BLUETOOTH_OFF)
+                }
+                BluetoothAdapter.STATE_ON -> synchronized(lock) {
+                    val current = mutableState.value
+                    if (server == null && current is TransportState.Error && current.message == BLUETOOTH_OFF) {
+                        Log.d(TAG, "Bluetooth back on")
+                        mutableState.value = TransportState.Idle
+                    }
+                }
+            }
+        }
+    }
+
+    // After adapterReceiver: initializers run in declaration order.
+    init {
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            appContext.registerReceiver(adapterReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            appContext.registerReceiver(adapterReceiver, filter)
         }
     }
 
@@ -195,14 +276,30 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         return characteristic === input || (characteristic.uuid == input.uuid && characteristic.properties == input.properties)
     }
 
+    /**
+     * One advertising set, created on the first advertisement and then only switched on and off,
+     * also across Stop and Start, until Bluetooth goes off. Windows reconnects to the last address
+     * it saw, and a new set gets a new private address; a kept set may keep its address until
+     * Android rotates it. Apps cannot choose the address itself.
+     */
     private fun startAdvertisingLocked() {
-        val leAdvertiser = advertiser ?: return
         if (advertising) return
-        val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+        advertising = true
+        advertisingSet?.let {
+            it.enableAdvertising(true, 0, 0)
+            return
+        }
+        if (advertisingSetStarting) return
+        val leAdvertiser = advertiser ?: run {
+            advertising = false
+            return
+        }
+        val parameters = AdvertisingSetParameters.Builder()
+            .setLegacyMode(true)
             .setConnectable(true)
-            .setTimeout(0)
+            .setScannable(true)
+            .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
             .build()
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
@@ -210,14 +307,23 @@ class AndroidHogpTransport(context: Context) : HidTransport {
             .build()
         // The phone's own name, since Android has no per-app advertised name.
         val scanResponse = AdvertiseData.Builder().setIncludeDeviceName(true).build()
-        advertising = true
-        leAdvertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
+        advertisingSetStarting = true
+        leAdvertiser.startAdvertisingSet(parameters, data, scanResponse, null, null, advertisingSetCallback)
     }
 
     private fun stopAdvertisingLocked() {
         if (!advertising) return
         advertising = false
-        advertiser?.stopAdvertising(advertiseCallback)
+        // Bluetooth may already be going off here, and the call may throw then; the stack drops
+        // the advertisement itself in that case.
+        runCatching { advertisingSet?.enableAdvertising(false, 0, 0) }
+    }
+
+    /** Only when Bluetooth goes off: the set does not survive it. */
+    private fun dropAdvertisingSetLocked() {
+        runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertisingSet(advertisingSetCallback) }
+        advertisingSet = null
+        advertisingSetStarting = false
     }
 
     private fun openPriorityClientLocked(device: BluetoothDevice) {
@@ -239,21 +345,39 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         }
     }
 
-    private val advertiseCallback = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-            Log.d(TAG, "advertising")
+    private val advertisingSetCallback = object : AdvertisingSetCallback() {
+        override fun onAdvertisingSetStarted(advertisingSet: AdvertisingSet?, txPower: Int, status: Int) {
+            Log.d(TAG, "advertising set started, status $status")
             synchronized(lock) {
-                if (host == null) mutableState.value = TransportState.Advertising
+                advertisingSetStarting = false
+                if (status != ADVERTISE_SUCCESS || advertisingSet == null) {
+                    advertising = false
+                    mutableState.value = TransportState.Error("Could not advertise (error $status)")
+                    return
+                }
+                this@AndroidHogpTransport.advertisingSet = advertisingSet
+                // Stopped while the set was being created: keep the set, switched off.
+                if (!advertising) advertisingSet.enableAdvertising(false, 0, 0)
+                else if (host == null && server != null) mutableState.value = TransportState.Advertising
             }
         }
 
-        override fun onStartFailure(errorCode: Int) {
-            Log.w(TAG, "advertising failed: $errorCode")
+        override fun onAdvertisingEnabled(advertisingSet: AdvertisingSet, enable: Boolean, status: Int) {
+            Log.d(TAG, "advertising ${if (enable) "on" else "off"}, status $status")
             synchronized(lock) {
-                advertising = false
-                if (errorCode != ADVERTISE_FAILED_ALREADY_STARTED) {
-                    mutableState.value = TransportState.Error("Could not advertise (error $errorCode)")
+                if (!enable) return
+                if (status != ADVERTISE_SUCCESS) {
+                    advertising = false
+                    mutableState.value = TransportState.Error("Could not advertise (error $status)")
+                } else if (host == null && server != null) {
+                    mutableState.value = TransportState.Advertising
                 }
+            }
+        }
+
+        override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet) {
+            synchronized(lock) {
+                if (this@AndroidHogpTransport.advertisingSet === advertisingSet) this@AndroidHogpTransport.advertisingSet = null
             }
         }
     }
@@ -280,7 +404,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                     }
                 }
                 val next = pendingServices.removeFirstOrNull()
-                if (next != null) gattServer.addService(next) else startAdvertisingLocked()
+                if (next != null) gattServer.addService(next) else if (foreground) startAdvertisingLocked()
             }
         }
 
@@ -303,7 +427,8 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                         closePriorityClientLocked()
                         if (server != null) {
                             mutableState.value = TransportState.Advertising
-                            startAdvertisingLocked()
+                            // Away, wait for the app to come back before inviting a host.
+                            if (foreground) startAdvertisingLocked()
                         }
                     }
                 }
@@ -393,6 +518,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
 
     private companion object {
         const val TAG = "GametapHogp"
+        const val BLUETOOTH_OFF = "Bluetooth is off"
 
         fun uuid(short: Int): UUID = UUID.fromString(HogpProfile.uuidString(short))
     }

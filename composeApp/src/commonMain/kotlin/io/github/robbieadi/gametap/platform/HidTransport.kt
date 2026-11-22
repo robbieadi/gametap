@@ -14,8 +14,11 @@ sealed interface TransportState {
 interface HidTransport {
     val state: StateFlow<TransportState>
 
-    /** True when the gamepad should stop shortly after the app leaves the foreground. */
-    val stopsInBackground: Boolean get() = false
+    /**
+     * Told when the app comes to the foreground and leaves it. The transport keeps its host
+     * either way; it may advertise or poll less while the app is away.
+     */
+    fun setForeground(foreground: Boolean) {}
 
     /** Registers the descriptor and starts advertising. */
     suspend fun start(descriptor: ByteArray)
