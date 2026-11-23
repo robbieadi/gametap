@@ -25,7 +25,7 @@ import io.github.robbieadi.gametap.ui.theme.GamepadColors
 
 fun TransportState.label(): String = when (this) {
     TransportState.Unsupported -> "Not supported on this device"
-    TransportState.Idle -> "Not started"
+    TransportState.Idle -> "Not connected"
     TransportState.Advertising -> "Waiting for a host"
     is TransportState.Connected -> "Connected to $hostName"
     is TransportState.Error -> message

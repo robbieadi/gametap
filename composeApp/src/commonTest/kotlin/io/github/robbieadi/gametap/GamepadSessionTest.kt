@@ -6,10 +6,10 @@ import io.github.robbieadi.gametap.domain.DeadzoneCurve
 import io.github.robbieadi.gametap.input.InputStateHolder
 import io.github.robbieadi.gametap.input.ReportSender
 import io.github.robbieadi.gametap.platform.BluetoothAccess
+import io.github.robbieadi.gametap.platform.GamepadKeepAlive
 import io.github.robbieadi.gametap.platform.HidTransport
 import io.github.robbieadi.gametap.platform.TransportState
-import io.github.robbieadi.gametap.viewmodel.ConnectionViewModel
-import kotlinx.coroutines.CoroutineScope
+import io.github.robbieadi.gametap.session.GamepadSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,9 +63,20 @@ private class CountingAccess : BluetoothAccess {
     }
 }
 
-class ConnectionViewModelTest {
+private class CountingKeepAlive : GamepadKeepAlive {
+    var running = false
+    var starts = 0
+
+    override fun start() {
+        running = true
+        starts++
+    }
+}
+
+class GamepadSessionTest {
     private val dispatcher: TestDispatcher = StandardTestDispatcher()
     private val access = CountingAccess()
+    private val keepAlive = CountingKeepAlive()
 
     @BeforeTest
     fun setUp() = Dispatchers.setMain(dispatcher)
@@ -73,46 +84,48 @@ class ConnectionViewModelTest {
     @AfterTest
     fun tearDown() = Dispatchers.resetMain()
 
-    private fun viewModel(transport: HidTransport) = ConnectionViewModel(
+    private fun session(transport: HidTransport) = GamepadSession(
         transport,
         access,
         ReportSender(InputStateHolder(), transport, stickCurve = { DeadzoneCurve() }),
-        CoroutineScope(dispatcher),
+        keepAlive,
     )
 
     /** Started, connected and visible: the state the app is in during play. */
-    private fun TestScope.playing(transport: StartingTransport): ConnectionViewModel {
-        val viewModel = viewModel(transport)
-        viewModel.onAppVisible(true)
-        viewModel.start()
+    private fun TestScope.playing(transport: StartingTransport): GamepadSession {
+        val session = session(transport)
+        session.onAppVisible(true)
+        session.start()
         runCurrent()
         transport.state.value = TransportState.Connected("host")
         runCurrent()
-        return viewModel
+        return session
     }
 
     @Test
     fun startAdvertisesAfterAccessIsGranted() = runTest(dispatcher) {
         val transport = StartingTransport()
-        viewModel(transport).start()
+        session(transport).start()
         runCurrent()
         assertEquals(1, access.prepares)
         assertEquals(1, transport.starts)
         assertEquals(TransportState.Advertising, transport.state.value)
+        assertEquals(true, keepAlive.running)
     }
 
     @Test
     fun keepsTheHostInTheBackgroundAndTellsTheTransport() = runTest(dispatcher) {
         val transport = StartingTransport()
-        val viewModel = playing(transport)
+        val session = playing(transport)
 
-        viewModel.onAppVisible(false)
+        session.onAppVisible(false)
         advanceTimeBy(60_000)
         runCurrent()
         assertEquals(0, transport.stops)
         assertEquals(TransportState.Connected("host"), transport.state.value)
+        assertEquals(true, keepAlive.running)
 
-        viewModel.onAppVisible(true)
+        session.onAppVisible(true)
         runCurrent()
         assertEquals(1, transport.starts)
         assertEquals(listOf(true, false, true), transport.foregroundCalls)
@@ -121,15 +134,15 @@ class ConnectionViewModelTest {
     @Test
     fun dropWhileAwayIsRestartedOnReturn() = runTest(dispatcher) {
         val transport = StartingTransport()
-        val viewModel = playing(transport)
+        val session = playing(transport)
 
-        viewModel.onAppVisible(false)
+        session.onAppVisible(false)
         transport.drops()
         advanceTimeBy(10_000)
         runCurrent()
         assertEquals(1, transport.starts, "must not restart while away")
 
-        viewModel.onAppVisible(true)
+        session.onAppVisible(true)
         runCurrent()
         assertEquals(2, transport.starts)
         assertEquals(TransportState.Advertising, transport.state.value)
@@ -147,30 +160,14 @@ class ConnectionViewModelTest {
     }
 
     @Test
-    fun stopMeansStayStopped() = runTest(dispatcher) {
-        val transport = StartingTransport()
-        val viewModel = playing(transport)
-
-        viewModel.stop()
-        runCurrent()
-        viewModel.onAppVisible(false)
-        advanceTimeBy(10_000)
-        viewModel.onAppVisible(true)
-        runCurrent()
-
-        assertEquals(1, transport.starts)
-        assertEquals(TransportState.Idle, transport.state.value)
-    }
-
-    @Test
     fun nothingStartsBeforeTheUserPressesStart() = runTest(dispatcher) {
         val transport = StartingTransport()
-        val viewModel = viewModel(transport)
+        val session = session(transport)
 
-        viewModel.onAppVisible(true)
-        viewModel.onAppVisible(false)
+        session.onAppVisible(true)
+        session.onAppVisible(false)
         advanceTimeBy(10_000)
-        viewModel.onAppVisible(true)
+        session.onAppVisible(true)
         runCurrent()
 
         assertEquals(0, transport.starts)
@@ -181,17 +178,18 @@ class ConnectionViewModelTest {
     fun refusedPermissionIsNotAskedAgainOnReturn() = runTest(dispatcher) {
         access.granted = false
         val transport = StartingTransport()
-        val viewModel = viewModel(transport)
-        viewModel.onAppVisible(true)
-        viewModel.start()
+        val session = session(transport)
+        session.onAppVisible(true)
+        session.start()
         runCurrent()
 
-        viewModel.onAppVisible(false)
+        session.onAppVisible(false)
         advanceTimeBy(10_000)
-        viewModel.onAppVisible(true)
+        session.onAppVisible(true)
         runCurrent()
 
         assertEquals(1, access.prepares)
         assertEquals(0, transport.starts)
+        assertEquals(0, keepAlive.starts)
     }
 }

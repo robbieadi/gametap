@@ -23,6 +23,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
 import io.github.robbieadi.gametap.domain.GamepadState
@@ -35,6 +37,9 @@ import io.github.robbieadi.gametap.hogp.LatestReportQueue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
 /**
@@ -44,8 +49,15 @@ import java.util.UUID
  * saving state that delayed reports by up to 700 ms. Low Energy has no sniff mode: the host polls
  * at a fixed connection interval and a report goes out at the next poll.
  *
- * - The host is reported as connected once it enables notifications on the input report. Android
- *   does not keep that setting between connections; BlueZ writes it on every connect.
+ * - The host is reported as connected once notifications are on for the input report. Android
+ *   does not keep that setting between connections, so it is saved per bonded host here: BlueZ
+ *   writes it on every connect, but Windows reconnects a bonded gamepad without writing it again,
+ *   and Gametap then sent nothing.
+ * - [stop] drops the link and stops advertising but keeps the services. The app no longer stops
+ *   the gamepad (see GamepadSession); only a crash calls this, before exiting.
+ *   Removing the services made Windows delete the gamepad device, even with the link already
+ *   down: Windows still connects to a stopped phone every 10 to 30 s, found no HID service, and
+ *   stopped connecting at all.
  * - The app also opens a GATT client back to the host on the same link and asks for high
  *   priority, which requests an 11.25 to 15 ms connection interval. Android gives a GATT server no
  *   way to ask for that itself. On Linux this halved the spread of report delays.
@@ -83,9 +95,45 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     // While the app is away the host stays connected, but nothing new is invited: no advertising.
     private var foreground = true
 
+    // Between Stop and Start: the server and its services stay, but no host is kept or invited.
+    private var stopped = false
+
+    // Completed when the next link goes down, for stop.
+    private var linkGone: CompletableDeferred<Unit>? = null
+
+    // Notification setting per bonded host address, which a bond keeps stable.
+    private val subscriptions = appContext.getSharedPreferences("hogp_subscriptions", Context.MODE_PRIVATE)
+
+    // The connected host while a link is up, kept across the process, and the last host that
+    // connected. A connected host still saved at startup means the process ended under it.
+    private val hosts = appContext.getSharedPreferences("hogp_hosts", Context.MODE_PRIVATE)
+
+    private val mutableForgottenHost = MutableStateFlow(hosts.getString(KEY_CONNECTED, null)?.let { ForgottenHost(it, lostServices = true) })
+    override val forgottenHost: StateFlow<ForgottenHost?> = mutableForgottenHost.asStateFlow()
+
+    // Runs while advertising with no host: a paired host that does not come back may have forgotten us.
+    private val reconnectCheck = Runnable {
+        synchronized(lock) {
+            if (host != null || !advertising || stopped) return@Runnable
+            val address = hosts.getString(KEY_LAST_ADDRESS, null) ?: return@Runnable
+            val bonded = manager?.adapter?.bondedDevices?.any { it.address == address } == true
+            if (bonded && mutableForgottenHost.value == null) {
+                mutableForgottenHost.value = ForgottenHost(hosts.getString(KEY_LAST_NAME, null) ?: address, lostServices = false)
+            }
+        }
+    }
+
     override suspend fun start(descriptor: ByteArray) {
         synchronized(lock) {
-            if (server != null) return
+            if (server != null) {
+                if (!stopped) return
+                stopped = false
+                Log.d(TAG, "start, server kept")
+                mutableState.value = TransportState.Advertising
+                if (foreground) startAdvertisingLocked()
+                return
+            }
+            stopped = false
             val adapter = manager?.adapter
             if (adapter != null && !adapter.isEnabled) {
                 // Android has no advertiser while the radio is off, which would read as unsupported.
@@ -120,22 +168,71 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     }
 
     /**
-     * Only for Stop. The host then sees the HID service disappear, and Windows deletes the gamepad
-     * until the next connection. Android has no way to drop the link first: it stays up while this
-     * app's GATT server is open, and closing the server removes the services.
+     * Drops the host and stops advertising, but keeps the server and its services: closing the
+     * server removed the HID service while the host was still connected, and Windows then deleted
+     * the gamepad device.
      */
+    /** Returns once the host's link is down, or after [EXIT_TIMEOUT_MS]. */
     override suspend fun stop() {
-        synchronized(lock) {
-            val gattServer = server ?: return
-            stopAdvertisingLocked()
-            closePriorityClientLocked()
-            host?.let(gattServer::cancelConnection)
-            gattServer.clearServices()
-            gattServer.close()
-            releaseLocked()
-            mutableState.value = TransportState.Idle
-        }
+        // A second caller, such as Recents during a Stop, waits for the same link.
+        val linkDown = synchronized(lock) {
+            if (stopLocked() != null) CompletableDeferred<Unit>().also { linkGone = it } else linkGone
+        } ?: return
+        val dropped = withTimeoutOrNull(EXIT_TIMEOUT_MS) { linkDown.await() } != null
+        Log.d(TAG, "stopped, link ${if (dropped) "down" else "still up after $EXIT_TIMEOUT_MS ms"}")
     }
+
+    /** Returns the host being disconnected, if there was one. */
+    private fun stopLocked(): BluetoothDevice? {
+        if (server == null || stopped) return null
+        stopped = true
+        stopAdvertisingLocked()
+        val leaving = host
+        leaving?.let(::disconnectLocked)
+        hosts.edit().remove(KEY_CONNECTED).commit() // Disconnected first, not under the host.
+        host = null
+        subscribed = false
+        reports.reset()
+        mutableState.value = TransportState.Idle
+        return leaving
+    }
+
+    /**
+     * [stop], blocking, for when the process is about to end: ending first would remove the
+     * services while the host is still connected. Bluetooth callbacks arrive on a binder thread,
+     * so this may block the main thread.
+     */
+    fun stopBeforeExit() = runBlocking { stop() }
+
+    /**
+     * cancelConnection only drops links the server opened itself, so open one on the same link
+     * first. The priority client also holds the link, so it goes too.
+     */
+    private fun disconnectLocked(device: BluetoothDevice) {
+        val gattServer = server ?: return
+        closePriorityClientLocked()
+        gattServer.connect(device, false)
+        gattServer.cancelConnection(device)
+        Log.d(TAG, "disconnecting ${device.address}")
+    }
+
+    /**
+     * Drops a link a host opened while stopped. Cancelling straight after connect, as
+     * [disconnectLocked] does, left such a link up for 5 s; 300 ms later it went in 2.3 to 2.5 s.
+     * Windows still loads the gamepad 0.7 s after the link comes up, so Steam still shows it.
+     */
+    private fun rejectLocked(device: BluetoothDevice) {
+        val gattServer = server ?: return
+        gattServer.connect(device, false)
+        Log.d(TAG, "rejecting ${device.address}, cancel in $REJECT_DELAY_MS ms")
+        mainHandler.postDelayed({
+            synchronized(lock) {
+                if (stopped && server === gattServer) gattServer.cancelConnection(device)
+            }
+        }, REJECT_DELAY_MS)
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
      * Away, the host stays connected with every control released (the gamepad screen does that),
@@ -146,7 +243,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         synchronized(lock) {
             if (this.foreground == foreground) return
             this.foreground = foreground
-            if (server == null) return
+            if (server == null || stopped) return
             if (host == null) {
                 if (foreground) startAdvertisingLocked() else stopAdvertisingLocked()
             } else {
@@ -160,6 +257,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     /** Forgets the server and the host. The caller sets the state. */
     private fun releaseLocked() {
         server = null
+        stopped = false
         advertiser = null
         advertising = false
         host = null
@@ -181,6 +279,9 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                     dropAdvertisingSetLocked()
                     val gattServer = server ?: return
                     Log.d(TAG, "Bluetooth turning off")
+                    // The services go with Bluetooth, under the host if one is connected.
+                    host?.let { mutableForgottenHost.value = ForgottenHost(it.name ?: it.address, lostServices = true) }
+                    hosts.edit().remove(KEY_CONNECTED).apply()
                     closePriorityClientLocked()
                     gattServer.close()
                     releaseLocked()
@@ -197,14 +298,49 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         }
     }
 
-    // After adapterReceiver: initializers run in declaration order.
-    init {
-        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(adapterReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            appContext.registerReceiver(adapterReceiver, filter)
+    /** A host that is unpaired forgets its notification setting, so a new pairing starts clean. */
+    private val bondReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR) != BluetoothDevice.BOND_NONE) return
+            @Suppress("DEPRECATION")
+            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            subscriptions.edit().remove(device.address).apply()
         }
+    }
+
+    // After the receivers: initializers run in declaration order.
+    init {
+        register(adapterReceiver, BluetoothAdapter.ACTION_STATE_CHANGED)
+        register(bondReceiver, BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        // A crash would otherwise end the process with the host still connected.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching { stopBeforeExit() }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
+    // System broadcasts still reach a receiver that is not exported.
+    private fun register(receiver: BroadcastReceiver, action: String) {
+        val filter = IntentFilter(action)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            appContext.registerReceiver(receiver, filter)
+        }
+    }
+
+    /** Called under [lock] when [device] has turned notifications on, or arrives with them saved. */
+    private fun onSubscribedLocked(device: BluetoothDevice) {
+        hosts.edit()
+            .putString(KEY_LAST_ADDRESS, device.address)
+            .putString(KEY_LAST_NAME, device.name ?: device.address)
+            .apply()
+        mutableForgottenHost.value = null
+        subscribed = true
+        reports.reset()
+        mutableState.value = TransportState.Connected(device.name ?: device.address)
+        reports.offer(latestReport) // Hosts can stall until a first report arrives.
     }
 
     override fun sendReport(reportId: Int, data: ByteArray): Boolean = synchronized(lock) {
@@ -219,7 +355,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         val gattServer = server ?: return false
         val device = host ?: return false
         val characteristic = reportCharacteristic ?: return false
-        if (!subscribed) return false
+        if (!subscribed || stopped) return false
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gattServer.notifyCharacteristicChanged(device, characteristic, false, report) == BluetoothStatusCodes.SUCCESS
         } else {
@@ -285,6 +421,8 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     private fun startAdvertisingLocked() {
         if (advertising) return
         advertising = true
+        mainHandler.removeCallbacks(reconnectCheck)
+        mainHandler.postDelayed(reconnectCheck, RECONNECT_WAIT_MS)
         advertisingSet?.let {
             it.enableAdvertising(true, 0, 0)
             return
@@ -312,6 +450,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     }
 
     private fun stopAdvertisingLocked() {
+        mainHandler.removeCallbacks(reconnectCheck)
         if (!advertising) return
         advertising = false
         // Bluetooth may already be going off here, and the call may throw then; the stack drops
@@ -411,21 +550,38 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             Log.d(TAG, "connection ${device.address} status $status state $newState")
             synchronized(lock) {
+                if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    linkGone?.complete(Unit)
+                    linkGone = null
+                }
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
+                        if (server == null) return
+                        if (stopped) {
+                            // A bonded host can still reach the phone; Stop means no host.
+                            rejectLocked(device)
+                            return
+                        }
                         if (host != null && host != device) return // One host at a time.
                         host = device
+                        // commit, not apply: the process may end any moment from here on.
+                        hosts.edit().putString(KEY_CONNECTED, device.name ?: device.address).commit()
                         subscribed = false
                         reports.reset()
                         stopAdvertisingLocked()
                         openPriorityClientLocked(device)
+                        val saved = device.bondState == BluetoothDevice.BOND_BONDED &&
+                            subscriptions.getBoolean(device.address, false)
+                        Log.d(TAG, "notifications saved as ${if (saved) "on" else "off"} for ${device.address}")
+                        if (saved) onSubscribedLocked(device)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> if (device == host) {
+                        hosts.edit().remove(KEY_CONNECTED).apply()
                         host = null
                         subscribed = false
                         reports.reset()
                         closePriorityClientLocked()
-                        if (server != null) {
+                        if (server != null && !stopped) {
                             mutableState.value = TransportState.Advertising
                             // Away, wait for the app to come back before inviting a host.
                             if (foreground) startAdvertisingLocked()
@@ -483,13 +639,15 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                 val enabled = value != null && value.isNotEmpty() && (value[0].toInt() and 0x01) != 0
                 Log.d(TAG, "notifications ${if (enabled) "on" else "off"} for ${device.address}")
                 synchronized(lock) {
-                    if (device == host) {
-                        subscribed = enabled
-                        reports.reset()
+                    if (device == host && !stopped) {
+                        if (device.bondState == BluetoothDevice.BOND_BONDED) {
+                            subscriptions.edit().putBoolean(device.address, enabled).apply()
+                        }
                         if (enabled) {
-                            mutableState.value = TransportState.Connected(device.name ?: device.address)
-                            reports.offer(latestReport) // Hosts can stall until a first report arrives.
+                            onSubscribedLocked(device)
                         } else {
+                            subscribed = false
+                            reports.reset()
                             mutableState.value = TransportState.Advertising
                         }
                     }
@@ -519,6 +677,18 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     private companion object {
         const val TAG = "GametapHogp"
         const val BLUETOOTH_OFF = "Bluetooth is off"
+
+        // The link went down 1.1 s after Disconnect on the Redmi Pad SE.
+        const val EXIT_TIMEOUT_MS = 2_000L
+
+        const val REJECT_DELAY_MS = 300L
+
+        // Windows reconnected 0.2 to 38 s after advertising began, or after its radio came back.
+        const val RECONNECT_WAIT_MS = 60_000L
+
+        const val KEY_CONNECTED = "connected"
+        const val KEY_LAST_ADDRESS = "last_address"
+        const val KEY_LAST_NAME = "last_name"
 
         fun uuid(short: Int): UUID = UUID.fromString(HogpProfile.uuidString(short))
     }

@@ -8,7 +8,7 @@ interface Haptics {
 }
 
 interface ScreenControl {
-    /** Keeps the screen awake and, where the platform needs it, goes landscape and full-screen. */
+    /** Keeps the screen awake and, where the platform needs it, goes full-screen. The app is always landscape. */
     fun setGamepadMode(enabled: Boolean)
 }
 

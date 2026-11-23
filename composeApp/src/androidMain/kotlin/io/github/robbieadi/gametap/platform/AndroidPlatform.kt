@@ -1,7 +1,6 @@
 package io.github.robbieadi.gametap.platform
 
 import android.content.Context
-import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -31,7 +30,6 @@ class AndroidScreenControl(private val activities: ActivityProvider) : ScreenCon
         val window = activity.window
         val insets = WindowCompat.getInsetsController(window, window.decorView)
         if (enabled) {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insets.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             insets.hide(WindowInsetsCompat.Type.systemBars())
@@ -40,7 +38,6 @@ class AndroidScreenControl(private val activities: ActivityProvider) : ScreenCon
                 window.decorView.requestUnbufferedDispatch(InputDevice.SOURCE_TOUCHSCREEN)
             }
         } else {
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             insets.show(WindowInsetsCompat.Type.systemBars())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

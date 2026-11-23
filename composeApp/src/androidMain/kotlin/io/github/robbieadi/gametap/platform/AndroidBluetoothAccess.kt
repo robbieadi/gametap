@@ -25,7 +25,7 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
     fun attach(activity: ComponentActivity) {
         permissionLauncher = activity.registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
-        ) { results -> pendingPermission?.complete(results.values.all { it }) }
+        ) { results -> pendingPermission?.complete(REQUIRED_PERMISSIONS.all { results[it] ?: hasPermission(it) }) }
         enableLauncher = activity.registerForActivityResult(
             ActivityResultContracts.StartActivityForResult(),
         ) { pendingEnable?.complete(Unit) }
@@ -34,20 +34,21 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
     override suspend fun prepare(): Boolean {
         val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
             ?: return true // The transport reports Unsupported.
-        if (!hasPermissions() && !requestPermissions()) return false
+        val missing = (REQUIRED_PERMISSIONS + OPTIONAL_PERMISSIONS).filterNot(::hasPermission)
+        if (missing.isNotEmpty() && !requestPermissions(missing.toTypedArray())) return false
         if (!isEnabled(adapter)) requestEnable()
         return isEnabled(adapter)
     }
 
-    private fun hasPermissions(): Boolean = REQUIRED_PERMISSIONS.all {
-        ContextCompat.checkSelfPermission(appContext, it) == PackageManager.PERMISSION_GRANTED
-    }
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
 
-    private suspend fun requestPermissions(): Boolean {
+    /** True if the required ones are granted; the optional ones may be refused. */
+    private suspend fun requestPermissions(permissions: Array<String>): Boolean {
         val launcher = permissionLauncher ?: return false
         val result = CompletableDeferred<Boolean>()
         pendingPermission = result
-        launcher.launch(REQUIRED_PERMISSIONS)
+        launcher.launch(permissions)
         return result.await()
     }
 
@@ -68,6 +69,15 @@ class AndroidBluetoothAccess(context: Context) : BluetoothAccess {
                 arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
             } else {
                 emptyArray() // BLUETOOTH and BLUETOOTH_ADMIN are granted at install time.
+            }
+
+        // Shows the gamepad's notification. Without it the gamepad still runs; Android asks at
+        // most twice, then refuses by itself.
+        val OPTIONAL_PERMISSIONS: Array<String> =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                emptyArray()
             }
     }
 }

@@ -8,6 +8,8 @@ import io.github.robbieadi.gametap.layout.LayoutStore
 import io.github.robbieadi.gametap.layout.LayoutStoreQualifier
 import io.github.robbieadi.gametap.layout.layoutDataStore
 import io.github.robbieadi.gametap.platform.BluetoothAccess
+import io.github.robbieadi.gametap.platform.GamepadKeepAlive
+import io.github.robbieadi.gametap.platform.NoKeepAlive
 import io.github.robbieadi.gametap.platform.Haptics
 import io.github.robbieadi.gametap.platform.HidTransport
 import io.github.robbieadi.gametap.platform.IosBluetoothAccess
@@ -37,6 +39,7 @@ actual fun platformModule(): Module =
         single<ScreenControl> { IosScreenControl() }
         single<MotionSensor> { IosMotionSensor() }
         single<VolumeKeyInput> { NoVolumeKeyInput }
+        single<GamepadKeepAlive> { NoKeepAlive }
         single<DataStore<LayoutStore>>(LayoutStoreQualifier) {
             layoutDataStore(FileSystem.SYSTEM) { documentsFile(LAYOUT_FILE_NAME) }
         }

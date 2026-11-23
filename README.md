@@ -14,10 +14,10 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 | Shared code (HID, input, sender, connection logic) | Unit tested |
 | Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE over classic Bluetooth, and again over Low Energy with a Windows host. **Not rechecked on Linux since Gametap took the Xbox identity**, see [Xbox identity](#xbox-identity) |
 | Multi-touch | Unit tested in the tracker. On the Redmi Pad SE over Low Energy, up to five fingers at once (both sticks, D-pad, a trigger and buttons) each held their own control while others were pressed, moved and released |
-| Leaving the app and coming back | The gamepad stays connected; tested for 60 s on the Redmi Pad SE with a Windows host, see [Using it](#using-it). Bluetooth off and on tested three times in a row |
+| Leaving the app and coming back | The gamepad stays connected; tested for 60 s on the Redmi Pad SE with a Windows host, see [Using it](#using-it). Bluetooth off and on tested three times in a row. A foreground service keeps the app running; swiping it away from Recents leaves the gamepad connected, tried once for 60 s |
 | Volume keys | Used on a Redmi Pad SE; about 150 ms slower than on-screen buttons, see [Volume keys](#volume-keys) |
 | Gyro | Tilt math and controls unit tested. iOS reader checked against CoreMotion's gravity on an iPhone 13 mini; **tilting not yet tried on a device** on either platform |
-| Windows hosts | Windows 11 with an Intel adapter. The Redmi Pad SE pairs as an Xbox Wireless Controller and gets Windows' XInput driver. Every control arrives correctly through XInput, DirectInput (`joy.cpl`) and Steam's SDL, which recognizes it without setup. Leaving Gametap keeps the connection, but **once the link is gone Windows does not reconnect by itself**, see [Windows hosts](#windows-hosts). The iPhone has not been tried since the change |
+| Windows hosts | Windows 11 with an Intel adapter. The Redmi Pad SE pairs as an Xbox Wireless Controller and gets Windows' XInput driver. Every control arrives correctly through XInput, DirectInput (`joy.cpl`) and Steam's SDL, which recognizes it without setup. Leaving Gametap keeps the connection. Windows reconnects by itself after **Stop** → **Start** and after its own Bluetooth goes off and on (each tried once), but **not after Gametap's process ends or the phone's Bluetooth restarts**, see [Windows hosts](#windows-hosts). The iPhone has not been tried since the change |
 | macOS host | An iPhone pairs. Android not tried |
 | iOS as a gamepad | Runs on an iPhone. Pairs with Linux and macOS, and Linux creates the gamepad device. Buttons not checked one at a time, see [iOS risks](#ios-risks) |
 
@@ -42,22 +42,39 @@ Set your signing team in Xcode, then run on a real device. The simulator has no 
 
 ## Using it
 
-1. Tap **Start gamepad** and allow the Bluetooth prompts. The phone starts advertising.
+1. Open Gametap and allow the Bluetooth prompts. It opens straight on the gamepad, always in
+   landscape, and the phone starts advertising. A banner under the status says how to pair, or
+   what is wrong, with **Try again** after a refused permission or an error.
 2. On the host, open Bluetooth settings and pair with the phone. Both sides show a 6-digit code;
    confirm it on both. On Linux this needs a pairing agent, see [Linux hosts](#linux-hosts).
-3. The gamepad opens when the host connects.
+3. The banner goes away when the host connects.
 
-After the first pairing, a Linux host reconnects by itself, usually within a second of **Start
-gamepad**. Windows does not, see [Windows hosts](#windows-hosts).
+After the first pairing, a Linux host reconnects by itself, usually within a second of opening
+Gametap. Windows does too while Gametap keeps running, see [Windows hosts](#windows-hosts).
 
 On Android, the gamepad stays connected while Gametap is in the background, for example after
 Home or locking the phone. Every control is released, reports slow to one every 500 ms, and the
 link asks the host for a slower, cheaper connection interval; coming back restores the fast one,
 and the gamepad works at once. If the host disconnects meanwhile, Gametap advertises again only
-when it is back on screen. **Stop** disconnects the host.
+when it is back on screen.
+
+There is no Stop. Once started, the gamepad stays on and the host stays connected; leave with
+Home or Back, and away from the gamepad screen every control is released, so the host gets no
+input. Disconnecting instead made Windows reconnect every 10 to
+30 s, see [Windows hosts](#windows-hosts). The gamepad ends when the phone goes out of range, or
+with Gametap's process.
+
+While the gamepad is on, Android shows a "Gamepad is on" notification with the connection; it is
+a foreground service, which keeps Android from ending Gametap in the background. On the Redmi Pad
+SE, Gametap then ran at OOM priority 50 in the background instead of 900, the first to be killed.
+Gametap asks for permission to post it; refusing hides the notification but changes nothing else.
+Swiping Gametap away from Recents closes only the screen: the gamepad stays on and connected,
+and the Redmi Pad SE kept the process through that swipe once the service ran (the host stayed
+connected for the minute it was watched). A crash disconnects first, for up to 2 s; that path is
+untested.
 
 If Bluetooth is turned off, the status says so, and the gamepad starts again when Bluetooth comes
-back on, unless you pressed **Stop**.
+back on and Gametap is on screen.
 
 On iOS the gamepad keeps running in the background. If you close Gametap from the app switcher
 or restart the phone, a Linux host may stop reconnecting, see [Linux hosts](#linux-hosts).
@@ -224,13 +241,50 @@ ships.
   no input while XInput did, so test with the window in front.
 - **Leaving Gametap keeps the gamepad.** It stayed connected and present in Windows through
   60 s in the background, and an A press right after coming back reached XInput.
-- **Windows does not reconnect by itself once the link is gone**, for example after **Stop**,
-  Bluetooth off, or Android stopping the app. The pairing stays valid, but nothing on Windows
-  asks for a connection: when the link drops, Windows removes the XInput device, as it does for a
-  switched-off Xbox controller, and in watches of 90 and 120 s after **Stop** → **Start** and after
-  Bluetooth off and on, no connection attempt reached the phone. Windows Settings has no Connect
-  button for a paired Low Energy device, so without a helper program the way back is removing
-  and pairing the phone again.
+- **Windows reconnects by itself while Gametap's services stay up.** After **Stop** → **Start**,
+  Windows connected 0.2 s after advertising began; after the PC's Bluetooth went off and on, it
+  connected 7.5 s after the radio returned. An A press reached XInput after each (each case tried
+  once). Two things made this work:
+  - **Windows does not turn notifications on again when it reconnects**, as the Bluetooth spec
+    allows for a bonded device. Gametap used to wait for that, so Windows did reconnect, but
+    Gametap kept showing "Waiting for a host" and sent nothing. Gametap now saves the setting for
+    each bonded host and restores it when that host connects; unpairing on the phone forgets it.
+  - **Stop kept the services** (Gametap has no Stop any more, see the next points). It dropped the
+    link and stopped advertising, and the link went down 1.1 s after **Disconnect**. Closing Gametap's GATT server removes the services, Windows then
+    deletes the gamepad device, and with it gone Windows does not reconnect, even while it sees
+    the phone advertising.
+- **Windows does not reconnect after Gametap's process ends while connected, or after the
+  phone's Bluetooth restarts.** Both close the GATT server under a connected host, so Windows
+  deletes the gamepad device as above. In 45 to 90 s afterwards, no connection attempt reached
+  the phone, also with a scan running on the PC. Windows Settings has no Connect button for a
+  paired Low Energy device; a program can connect it, see below. The foreground service makes the
+  process ending rare. Ending while no host is connected can do the same: once, **Stop** then
+  Force stop then **Start gamepad** (now opening Gametap) reconnected in 0.56 s, but when Windows connected during the
+  gap (see the next point), it found no HID service, removed the gamepad and stopped connecting.
+  Bringing it back with the program below then gave a generic HID game controller, not an XInput
+  one. A user's force stop also needed pairing again.
+- **Gametap says when Windows has probably forgotten it.** It saves the host while a link is up
+  and clears it when the link drops. If Gametap starts with a host still saved, or Bluetooth goes
+  off under one, the banner says the PC has probably forgotten the controller and to remove the
+  phone in Windows and add it again; this showed after the process was killed under Windows, and
+  Windows had indeed removed the gamepad. If the last paired host has not reconnected after 60 s
+  of advertising, a milder banner says it may have; Windows once took 38 s to reconnect after its
+  radio came back.
+- **Microsoft Swift Pair did not work on the test PC, so Gametap does not use it.** It would
+  make adding the phone again one click. Twice, with Swift Pair notifications on and the phone
+  removed in Windows, no notification appeared, also with the tablet next to the PC. The second
+  try followed Microsoft's guideline as far as an app can: manufacturer data for company 0x0006,
+  `03 00 80` then the phone's name, in the advertisement itself (Windows does not scan actively),
+  connectable, general discoverable, every 100 ms, from a fresh address. A passive scan on the PC
+  received exactly that, at −60 to −63 dBm. Microsoft says Swift Pair also needs support in the
+  PC's Bluetooth radio; the PC was on a Windows Insider build (26300).
+- **Windows kept reconnecting while the gamepad was stopped**, which is why Gametap has no Stop
+  any more. It connected every 10 to 30 s although the phone was not advertising for Gametap,
+  probably through the phone's other connectable advertising. Gametap dropped each link, but the
+  link stayed up 2.3 to 2.5 s (5 s before Gametap waited 300 ms between Android's connect and
+  cancel calls), and Windows loads the gamepad 0.7 s after the link comes up, so Steam showed it
+  connect and disconnect each time. Removing the services while stopped would end this, but makes
+  Windows delete the gamepad as above.
 - **A program can reconnect it without pairing again.** Asking Windows for the phone's GATT
   services (`BluetoothLEDevice.GetGattServicesAsync`) connects it, and the gamepad comes back.
   Windows connects to the last address it saw for the phone, so this needs the phone to keep its
@@ -239,10 +293,8 @@ ships.
   cycles, with 10 of 11 connections succeeding without a scan. When Gametap still started a new
   advertisement each time, 14 attempts in a row failed with "Unreachable" until a 3 s scan showed
   Windows the new address. Android rotates the address every 7 to 15 minutes by default, and
-  after Bluetooth off and on it is new.
-- **Stop removes the gamepad from Windows.** Android keeps the link up while Gametap's GATT
-  server is open, and closing the server removes the services first, so Windows sees the HID
-  service disappear and deletes the gamepad device until the next connection.
+  after Bluetooth off and on it is new. After such a connection, Windows turned notifications on
+  itself 7 s later, and Gametap saved the setting from then on.
 - **Some connections fail at the radio.** In one attempt the link came up, the PC's controller
   never answered the phone's feature request, and the link dropped after the 40 s link-layer
   timeout.

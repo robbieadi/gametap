@@ -34,7 +34,9 @@ import io.github.robbieadi.gametap.layout.LayoutProfile
 import io.github.robbieadi.gametap.layout.ScreenSize
 import io.github.robbieadi.gametap.layout.controlIds
 import io.github.robbieadi.gametap.layout.screenIssues
+import io.github.robbieadi.gametap.platform.ForgottenHost
 import io.github.robbieadi.gametap.platform.TransportState
+import io.github.robbieadi.gametap.ui.components.ConnectionBanner
 import io.github.robbieadi.gametap.ui.components.FitBanner
 import io.github.robbieadi.gametap.ui.components.GamepadCanvas
 import io.github.robbieadi.gametap.ui.components.GamepadMenu
@@ -48,12 +50,17 @@ import kotlinx.coroutines.flow.StateFlow
 fun GamepadScreen(
     viewModel: GamepadViewModel,
     transportState: StateFlow<TransportState>,
+    permissionDenied: StateFlow<Boolean>,
+    /** A paired host that has probably forgotten the gamepad, see HidTransport. */
+    forgottenHost: StateFlow<ForgottenHost?>,
+    /** Asks for Bluetooth again after it was refused, or retries after an error. */
+    onTryAgain: () -> Unit,
     /** Opens the editor on the profile with this id. */
     onEditLayout: (String) -> Unit,
-    /** Back to the start screen. [disconnect] also stops the gamepad. */
-    onLeave: (disconnect: Boolean) -> Unit,
 ) {
     val transport by transportState.collectAsState()
+    val denied by permissionDenied.collectAsState()
+    val forgotten by forgottenHost.collectAsState()
     val layout by viewModel.layout.collectAsState()
     val layouts by viewModel.layouts.collectAsState()
     val touchView = viewModel.tracker.view.collectAsState()
@@ -139,6 +146,7 @@ fun GamepadScreen(
                 viewModel.onMenuOpened()
                 menuOpen = true
             }
+            ConnectionBanner(transport, denied, forgotten, onTryAgain)
             if (showBanner) {
                 FitBanner(onEdit = { onEditLayout(layout.id) }, onDismiss = { dismissedFor = layout to size })
             }
@@ -146,7 +154,6 @@ fun GamepadScreen(
         if (menuOpen) {
             GamepadMenu(
                 layouts = layouts,
-                transport = transport,
                 onSelectProfile = { id ->
                     viewModel.selectProfile(id)
                     menuOpen = false
@@ -159,10 +166,6 @@ fun GamepadScreen(
                     onEditLayout(layout.id)
                 },
                 onResume = { menuOpen = false },
-                onLeave = {
-                    menuOpen = false
-                    onLeave(transport is TransportState.Connected || transport == TransportState.Advertising)
-                },
             )
         }
         renaming?.let { id ->

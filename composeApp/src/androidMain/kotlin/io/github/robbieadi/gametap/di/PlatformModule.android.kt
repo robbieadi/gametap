@@ -9,6 +9,8 @@ import io.github.robbieadi.gametap.layout.layoutDataStore
 import io.github.robbieadi.gametap.platform.ActivityProvider
 import io.github.robbieadi.gametap.platform.AndroidBluetoothAccess
 import io.github.robbieadi.gametap.platform.AndroidHaptics
+import io.github.robbieadi.gametap.platform.AndroidKeepAlive
+import io.github.robbieadi.gametap.platform.GamepadKeepAlive
 import io.github.robbieadi.gametap.platform.AndroidHogpTransport
 import io.github.robbieadi.gametap.platform.AndroidMotionSensor
 import io.github.robbieadi.gametap.platform.AndroidScreenControl
@@ -33,6 +35,7 @@ actual fun platformModule(): Module = module {
     single<ScreenControl> { AndroidScreenControl(get()) }
     single<MotionSensor> { AndroidMotionSensor(get(), get()) }
     single { AndroidVolumeKeyInput() } bind VolumeKeyInput::class
+    single<GamepadKeepAlive> { AndroidKeepAlive(get()) }
     single<DataStore<LayoutStore>>(LayoutStoreQualifier) {
         val context = get<Context>()
         // In the folder DataStore uses.

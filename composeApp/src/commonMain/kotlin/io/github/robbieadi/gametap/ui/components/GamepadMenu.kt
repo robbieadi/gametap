@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.robbieadi.gametap.layout.DefaultLayout
 import io.github.robbieadi.gametap.layout.Layouts
-import io.github.robbieadi.gametap.platform.TransportState
 import io.github.robbieadi.gametap.ui.theme.GamepadColors
 
 /**
@@ -46,14 +45,12 @@ import io.github.robbieadi.gametap.ui.theme.GamepadColors
 @Composable
 fun GamepadMenu(
     layouts: Layouts,
-    transport: TransportState,
     onSelectProfile: (String) -> Unit,
     onDuplicateProfile: (String) -> Unit,
     onRenameProfile: (String) -> Unit,
     onDeleteProfile: (String) -> Unit,
     onEditLayout: () -> Unit,
     onResume: () -> Unit,
-    onLeave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -98,17 +95,9 @@ fun GamepadMenu(
             ) {
                 Button(onClick = onResume, modifier = Modifier.fillMaxWidth()) { Text("Resume") }
                 OutlinedButton(onClick = onEditLayout, modifier = Modifier.fillMaxWidth()) { Text("Edit layout") }
-                OutlinedButton(onClick = onLeave, modifier = Modifier.fillMaxWidth()) { Text(leaveLabel(transport)) }
             }
         }
     }
-}
-
-/** Leaving always ends at the start screen. While a host is involved it also stops the gamepad. */
-private fun leaveLabel(transport: TransportState): String = when (transport) {
-    is TransportState.Connected -> "Disconnect"
-    TransportState.Advertising -> "Stop"
-    else -> "Exit"
 }
 
 @Composable

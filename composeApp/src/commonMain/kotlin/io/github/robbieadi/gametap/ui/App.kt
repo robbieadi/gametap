@@ -2,15 +2,11 @@ package io.github.robbieadi.gametap.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import io.github.robbieadi.gametap.platform.TransportState
-import io.github.robbieadi.gametap.ui.screens.ConnectScreen
 import io.github.robbieadi.gametap.ui.screens.EditorScreen
 import io.github.robbieadi.gametap.ui.screens.GamepadScreen
 import io.github.robbieadi.gametap.ui.theme.GametapTheme
@@ -20,7 +16,6 @@ import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 private object Routes {
-    const val CONNECT = "connect"
     const val GAMEPAD = "gamepad"
 }
 
@@ -41,31 +36,19 @@ fun App() {
             onStopOrDispose { connection.onAppVisible(false) }
         }
 
-        // Lives here, not in ConnectScreen, so going back while connected does not bounce forward.
-        val state by connection.state.collectAsState()
-        val isConnected = state is TransportState.Connected
-        LaunchedEffect(isConnected) {
-            if (isConnected) navController.navigate(Routes.GAMEPAD) { launchSingleTop = true }
-        }
+        // No start screen: opening the app starts the gamepad, asking for Bluetooth if needed.
+        // Starting again, for example after the screen was swiped away, keeps a running gamepad.
+        LaunchedEffect(connection) { connection.start() }
 
-        NavHost(navController, startDestination = Routes.CONNECT) {
-            composable(Routes.CONNECT) {
-                ConnectScreen(
-                    viewModel = connection,
-                    onOpenGamepad = {
-                        navController.navigate(Routes.GAMEPAD) { launchSingleTop = true }
-                    },
-                )
-            }
+        NavHost(navController, startDestination = Routes.GAMEPAD) {
             composable(Routes.GAMEPAD) {
                 GamepadScreen(
                     viewModel = koinViewModel(),
                     transportState = connection.state,
+                    permissionDenied = connection.permissionDenied,
+                    forgottenHost = connection.forgottenHost,
+                    onTryAgain = connection::start,
                     onEditLayout = { id -> navController.navigate(EditorRoute(id)) },
-                    onLeave = { disconnect ->
-                        if (disconnect) connection.stop()
-                        navController.popBackStack(Routes.CONNECT, inclusive = false)
-                    },
                 )
             }
             composable<EditorRoute> { entry ->
