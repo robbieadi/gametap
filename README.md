@@ -12,12 +12,12 @@ encoding, input handling and UI are all shared; platform code only moves bytes o
 | Part | State |
 |------|-------|
 | Shared code (HID, input, sender, connection logic) | Unit tested |
-| Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE over classic Bluetooth, and again over Low Energy with a Windows host. **Not rechecked on Linux since Gametap took the Xbox identity**, see [Xbox identity](#xbox-identity) |
+| Android app with a Linux host | Pairs, reconnects and sends buttons on a Redmi Pad SE and a Galaxy A54, see [Latency](#latency). Every control was tested one at a time on the Redmi Pad SE over classic Bluetooth, over Low Energy with a Windows host, and again over Low Energy with a Linux host after Gametap took the Xbox identity, see [Linux hosts](#linux-hosts) |
 | Multi-touch | Unit tested in the tracker. On the Redmi Pad SE over Low Energy, up to five fingers at once (both sticks, D-pad, a trigger and buttons) each held their own control while others were pressed, moved and released |
 | Leaving the app and coming back | The gamepad stays connected; tested for 60 s on the Redmi Pad SE with a Windows host, see [Using it](#using-it). Bluetooth off and on tested three times in a row. A foreground service keeps the app running; swiping it away from Recents leaves the gamepad connected, tried once for 60 s |
 | Volume keys | Used on a Redmi Pad SE; about 150 ms slower than on-screen buttons, see [Volume keys](#volume-keys) |
 | Gyro | Tilt math and controls unit tested. iOS reader checked against CoreMotion's gravity on an iPhone 13 mini; **tilting not yet tried on a device** on either platform |
-| Windows hosts | Windows 11 with an Intel adapter. The Redmi Pad SE pairs as an Xbox Wireless Controller and gets Windows' XInput driver. Every control arrives correctly through XInput, DirectInput (`joy.cpl`) and Steam's SDL, which recognizes it without setup. Leaving Gametap keeps the connection. Windows reconnects by itself after **Stop** → **Start** and after its own Bluetooth goes off and on (each tried once), but **not after Gametap's process ends or the phone's Bluetooth restarts**, see [Windows hosts](#windows-hosts). The iPhone has not been tried since the change |
+| Windows hosts | Windows 11 with an Intel adapter. The Redmi Pad SE pairs as an Xbox Wireless Controller and gets Windows' XInput driver. Every control arrives correctly through XInput, DirectInput (`joy.cpl`) and Steam's SDL, which recognizes it without setup. Leaving Gametap keeps the connection. Windows reconnected by itself after **Stop** → **Start**, when Gametap still had Stop, and after its own Bluetooth goes off and on (each tried once), but **not after Gametap's process ends or the phone's Bluetooth restarts**, see [Windows hosts](#windows-hosts). The iPhone has not been tried since the change |
 | macOS host | An iPhone pairs. Android not tried |
 | iOS as a gamepad | Runs on an iPhone. Pairs with Linux and macOS, and Linux creates the gamepad device. Buttons not checked one at a time, see [iOS risks](#ios-risks) |
 
@@ -79,8 +79,8 @@ back on and Gametap is on screen.
 On iOS the gamepad keeps running in the background. If you close Gametap from the app switcher
 or restart the phone, a Linux host may stop reconnecting, see [Linux hosts](#linux-hosts).
 
-Tap the connection status at the top of the gamepad to open the menu, where you switch layouts,
-edit the current one or exit.
+Tap the connection status at the top of the gamepad to open the menu, where you switch layouts
+or edit the current one. To leave, use Home or Back.
 
 ### Sticks and haptics
 
@@ -151,10 +151,11 @@ settings, or `evtest` / `jstest` on Linux.
 
 - **Android phones that cannot advertise over Bluetooth Low Energy.** Mostly older or budget
   devices. The app then says the phone cannot act as a controller.
-- **The background connection lasts as long as Android keeps Gametap running.** There is no
-  foreground service, so HyperOS and similar systems may stop the app after a while in the
-  background, and the host then loses the gamepad. On Windows that means connecting again by hand,
-  see [Windows hosts](#windows-hosts).
+- **The background connection lasts as long as Android keeps Gametap running.** The foreground
+  service makes Android much less likely to end it (see [Using it](#using-it)), but systems such
+  as HyperOS may still stop apps in the background, and the host then loses the gamepad. Linux
+  reconnects once Gametap is open again; Windows has to pair again, see
+  [Windows hosts](#windows-hosts). Hours in the background have not been tested.
 - **Descriptor changes.** Hosts cache the descriptor. Remove the device from the host's Bluetooth
   settings, forget the host on the phone, and pair again after any change.
 - **No rumble, no Share button.** Hosts can send rumble, which is accepted and ignored. The Share
@@ -177,13 +178,27 @@ Bluetooth mode reports `045E:02E0` (Xbox One S).
 - **The IDs are Microsoft's.** USB-IF rules reserve a vendor ID to the company it is assigned to,
   and app stores may treat presenting as another company's hardware as misrepresentation. Avoid
   Xbox names and logos in the app and its store listing.
-- **Not yet checked on Linux, macOS or with an iPhone.** Linux's and macOS's handling of an Xbox
-  controller that is a phone, including BlueZ taking the IDs from the phone's own record, see
-  [Linux hosts](#linux-hosts), is untested.
+- **Checked on Windows and Linux with Android; not yet on macOS or with an iPhone.** On Linux,
+  BlueZ may use the phone's own IDs for the first connection, see [Linux hosts](#linux-hosts).
 
 ### Linux hosts
 
-These were found with BlueZ 5.87. Other desktops and BlueZ versions may differ.
+These were found with BlueZ 5.87 and 5.88. Other desktops and BlueZ versions may differ.
+
+- **It is an Xbox controller to Linux.** Checked with BlueZ 5.88 and a Redmi Pad SE. With the
+  Xbox IDs, the kernel binds its `microsoft` driver, and Steam's SDL names it "Xbox Series X
+  Controller" with its built-in mapping and Steam's Xbox configuration. Every control arrives in
+  evdev, checked one at a time: the 11 buttons (`BTN_SOUTH` to `BTN_THUMBR`), the D-pad as
+  `ABS_HAT0X`/`ABS_HAT0Y`, the sticks as `ABS_X`/`ABS_Y` and `ABS_Z`/`ABS_RZ` (about 660 to 64840,
+  both directions), and the triggers as analog `ABS_BRAKE` (left) and `ABS_GAS` (right).
+- **Linux reconnects by itself, also after Gametap's process ends.** After the PC disconnected
+  it, the gamepad was back in 0.55 to 0.65 s (three times); after a force stop and opening
+  Gametap again, in 3.7 s. Unlike Windows, the gamepad kept its Xbox IDs each time. A press
+  reached evdev after the restart and after 30 s in the background.
+- **No new pairing was needed for the Xbox identity.** A PC paired before the change read the
+  new Report Map by itself. The first connection, though, used the IDs from the phone's own
+  record (`038F:1200`, the generic HID driver, and a generic Steam mapping); from the next
+  connection on it had the Xbox IDs. If that happens, disconnect the gamepad once from the PC.
 
 - **A pairing agent must be running.** Pairing needs a 6-digit code confirmed on both sides, and
   BlueZ hands that to a separate agent program. GNOME, KDE and shells such as Noctalia include
@@ -195,15 +210,20 @@ These were found with BlueZ 5.87. Other desktops and BlueZ versions may differ.
   Bluetooth keys, and BlueZ shows one device with both. A plain connect, including
   `bluetoothctl connect` and most desktop Connect buttons, uses whichever was used last, which is
   often classic. That fails or connects only the phone's audio. To connect the gamepad, open
-  Gametap and run, with the phone's address:
+  Gametap and run `bluetoothctl scan le`: with BlueZ 5.88, the scan alone connected the paired
+  gamepad within about a second. Or call, with the phone's device path:
 
   ```sh
   busctl --system call org.bluez /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF org.bluez.Bearer.LE1 Connect
   ```
 
-  It may need a scan running first (`bluetoothctl scan le`). Once the gamepad has connected,
-  BlueZ reconnects it by itself. To make plain connects use Low Energy, set `Experimental = true`
-  in `/etc/bluetooth/main.conf`, restart Bluetooth, and set
+  The path may not match the phone's address: BlueZ 5.88 kept the Redmi Pad SE (address
+  `2C:0B:97:23:41:95`) under `dev_5F_90_10_A6_51_C4`, a private address it saw earlier, and the
+  address-based path did not exist. `busctl --system tree org.bluez` lists the paths, and the
+  `Address` property of each says which one is the phone. Without a scan running, this call timed
+  out after 25 s. Once the gamepad has connected, BlueZ reconnects it by itself. To make plain
+  connects use Low Energy, set `Experimental = true` in `/etc/bluetooth/main.conf`, restart
+  Bluetooth, and set
   `busctl --system set-property org.bluez /org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF org.bluez.Device1 PreferredBearer s le`.
   This last step is untested.
 - **If an iPhone stops reconnecting.** When Gametap is closed, the host forgets the gamepad
@@ -218,8 +238,9 @@ These were found with BlueZ 5.87. Other desktops and BlueZ versions may differ.
 - **The gamepad may show the phone's name and ID.** BlueZ names the gamepad after the phone and
   takes the vendor and product ID from the device record it saw last: the phone's own classic
   Bluetooth record (for example Apple 004C:7504) or Gametap's PnP ID. The ID can change between
-  connections, so Steam may treat it as a new controller. Apps cannot change this; the fix would
-  be in BlueZ.
+  connections, so Steam may treat it as a new controller. With BlueZ 5.88 this happened only on
+  the first connection after the Xbox identity change, see above. Apps cannot change this; the
+  fix would be in BlueZ.
 
 ### Windows hosts
 
@@ -241,7 +262,8 @@ ships.
   no input while XInput did, so test with the window in front.
 - **Leaving Gametap keeps the gamepad.** It stayed connected and present in Windows through
   60 s in the background, and an A press right after coming back reached XInput.
-- **Windows reconnects by itself while Gametap's services stay up.** After **Stop** → **Start**,
+- **Windows reconnects by itself while Gametap's services stay up.** After **Stop** → **Start**
+  (when Gametap still had Stop),
   Windows connected 0.2 s after advertising began; after the PC's Bluetooth went off and on, it
   connected 7.5 s after the radio returned. An A press reached XInput after each (each case tried
   once). Two things made this work:
@@ -345,8 +367,8 @@ the phone's Wi-Fi on, so treat that comparison as rough.
 **Report pacing.** Reports are capped at one per 8 ms, and `ReportSender` repeats the last report
 every 16 ms while the gamepad screen is open. The repeat was added because classic Bluetooth
 fell into sniff mode on an idle link. On Low Energy it still helps a little: on the Redmi Pad SE,
-with it the p90 was 18 ms above the fastest press (90 presses), without it 28 ms (45 presses). It
-stops when the gamepad screen closes. Both intervals count from when a send starts. Android allows one
+with it the p90 was 18 ms above the fastest press (90 presses), without it 28 ms (45 presses). Away
+from the gamepad screen it repeats every 500 ms instead, see [Using it](#using-it). Both intervals count from when a send starts. Android allows one
 notification in flight, so a newer report replaces one still waiting to go out.
 
 ## Axis mapping
