@@ -53,7 +53,8 @@ import java.util.UUID
  *   does not keep that setting between connections, so it is saved per bonded host here: BlueZ
  *   writes it on every connect, but Windows reconnects a bonded gamepad without writing it again,
  *   and Gametap then sent nothing. It is restored 1 s after connecting, unless the host has
- *   started pairing again by then (see [KNOWN_HOST_WAIT_MS]).
+ *   started pairing again by then (see [KNOWN_HOST_WAIT_MS]); a bonded host with nothing saved
+ *   counts as on.
  * - [stop] drops the link and stops advertising but keeps the services. The app no longer stops
  *   the gamepad (see GamepadSession); only a crash calls this, before exiting.
  *   Removing the services made Windows delete the gamepad device, even with the link already
@@ -331,14 +332,20 @@ class AndroidHogpTransport(context: Context) : HidTransport {
     /**
      * For a bonded host that has not started pairing again: restores its notification setting
      * and opens the priority client. See [KNOWN_HOST_WAIT_MS].
+     *
+     * With nothing saved for the host, notifications count as on. That happens when Gametap's data
+     * was cleared, for example by reinstalling, while the host stayed paired: Windows never writes
+     * the setting again on reconnect, so it showed a connected controller that got no input until
+     * it was paired again. A host that turned notifications off is still respected.
      */
     private val knownHostCheck = Runnable {
         synchronized(lock) {
             val device = host ?: return@Runnable
             if (stopped || device.bondState != BluetoothDevice.BOND_BONDED) return@Runnable
-            val saved = subscriptions.getBoolean(device.address, false)
-            Log.d(TAG, "notifications saved as ${if (saved) "on" else "off"} for ${device.address}")
-            if (saved && !subscribed) onSubscribedLocked(device)
+            val known = subscriptions.contains(device.address)
+            val on = !known || subscriptions.getBoolean(device.address, false)
+            Log.d(TAG, "notifications ${if (known) "saved as" else "not saved, taken as"} ${if (on) "on" else "off"} for ${device.address}")
+            if (on && !subscribed) onSubscribedLocked(device)
             openPriorityClientLocked(device)
         }
     }
@@ -391,13 +398,52 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         val device = host ?: return false
         val characteristic = reportCharacteristic ?: return false
         if (!subscribed || stopped) return false
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gattServer.notifyCharacteristicChanged(device, characteristic, false, report) == BluetoothStatusCodes.SUCCESS
+        val accepted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val code = gattServer.notifyCharacteristicChanged(device, characteristic, false, report)
+            code == BluetoothStatusCodes.SUCCESS
         } else {
             characteristic.value = report
             gattServer.notifyCharacteristicChanged(device, characteristic, false)
         }
+        if (accepted) {
+            mainHandler.removeCallbacks(lostConfirmation)
+            if (unconfirmed) {
+                // Not in flight: the next report may go as soon as it is offered.
+                mainHandler.post(markReady)
+            } else {
+                mainHandler.postDelayed(lostConfirmation, CONFIRMATION_WAIT_MS)
+            }
+        }
+        return accepted
     }
+
+    /**
+     * Confirmations can stop for good. Android's GATT service holds back onNotificationSent while
+     * a server is congested and releases it when congestion clears; when a link dropped while
+     * congested, the clear never came, so Gametap's server stayed congested for the rest of the
+     * process and no confirmation reached it again, across every later reconnect. [reports]
+     * waited for one, so the gamepad showed connected but sent nothing. Seen three times on the
+     * Redmi Pad SE with Windows, each congestion about 1 s before Windows dropped the link.
+     *
+     * After [MISSED_CONFIRMATIONS] misses in a row Gametap stops waiting; [ReportSender] already
+     * spaces reports, and in that mode about 57 reports a second went out with none refused. A
+     * confirmation that does arrive turns waiting back on.
+     */
+    private var unconfirmed = false
+    private var missedConfirmations = 0
+
+    private val lostConfirmation = Runnable {
+        synchronized(lock) {
+            missedConfirmations++
+            if (!unconfirmed && missedConfirmations >= MISSED_CONFIRMATIONS) {
+                unconfirmed = true
+                Log.w(TAG, "notifications are not being confirmed; sending without waiting")
+            }
+            reports.onReady()
+        }
+    }
+
+    private val markReady = Runnable { synchronized(lock) { reports.onReady() } }
 
     private fun toGatt(spec: HogpCharacteristic): BluetoothGattCharacteristic {
         val encrypted = spec.access == HogpAccess.Encrypted
@@ -705,7 +751,15 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
-            synchronized(lock) { reports.onReady() }
+            mainHandler.removeCallbacks(lostConfirmation)
+            synchronized(lock) {
+                missedConfirmations = 0
+                if (unconfirmed) {
+                    unconfirmed = false
+                    Log.d(TAG, "notifications are confirmed again; waiting for each")
+                }
+                reports.onReady()
+            }
         }
     }
 
@@ -720,6 +774,10 @@ class AndroidHogpTransport(context: Context) : HidTransport {
 
         // Windows reconnected 0.2 to 38 s after advertising began, or after its radio came back.
         const val RECONNECT_WAIT_MS = 60_000L
+
+        // The stack confirmed within 1 ms of each send, also at the slow background interval.
+        const val CONFIRMATION_WAIT_MS = 100L
+        const val MISSED_CONFIRMATIONS = 3
 
         /**
          * How long a bonded host has to start pairing again before it is treated as known. A host

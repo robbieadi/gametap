@@ -303,7 +303,20 @@ ships.
     allows for a bonded device. Gametap used to wait for that, so Windows did reconnect, but
     Gametap kept showing "Waiting for a host" and sent nothing. Gametap now saves the setting for
     each bonded host and restores it 1 s after that host connects, unless it pairs again (see
-    [Linux hosts](#linux-hosts)); unpairing on the phone, or pairing again, forgets it.
+    [Linux hosts](#linux-hosts)); unpairing on the phone, or pairing again, forgets it. With
+    nothing saved for a bonded host it counts as on: after Gametap was reinstalled while Windows
+    stayed paired, Windows showed a connected controller that got no input until this, and then
+    an A press got through. The 1 s delay held up with Windows: reconnects after its radio came
+    back, after Back and reopening, and a fresh pairing all ended with input reaching XInput.
+- **A congested link could leave the gamepad silent for good.** Gametap sends one report, then
+  waits for Android to confirm it before the next. Android's GATT service holds those
+  confirmations back while a server is congested and releases them when congestion clears. Three
+  times, the link to Windows became congested about 1 s before Windows dropped it, the clear never
+  came, and no confirmation reached Gametap again, across every later reconnect: it showed
+  connected but sent nothing. Gametap now stops waiting after 3 confirmations are missing for
+  100 ms each, and waits again if one arrives. In that mode it sent about 57 reports a second with
+  none refused, and in 30 rounds of Back and reopening (Windows dropped the link in 4), 28 got
+  every A press through; the other 2 lost presses while Windows was dropping the link.
   - **Stop kept the services** (Gametap has no Stop any more, see the next points). It dropped the
     link and stopped advertising, and the link went down 1.1 s after **Disconnect**. Closing Gametap's GATT server removes the services, Windows then
     deletes the gamepad device, and with it gone Windows does not reconnect, even while it sees
