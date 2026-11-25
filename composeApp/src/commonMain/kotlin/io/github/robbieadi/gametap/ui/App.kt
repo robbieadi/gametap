@@ -47,6 +47,8 @@ fun App() {
                     transportState = connection.state,
                     permissionDenied = connection.permissionDenied,
                     forgottenHost = connection.forgottenHost,
+                    wifiClash = connection.wifiClash,
+                    onDismissWifiClash = connection::dismissWifiClash,
                     onTryAgain = connection::start,
                     onEditLayout = { id -> navController.navigate(EditorRoute(id)) },
                 )

@@ -23,6 +23,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
@@ -118,6 +119,26 @@ class AndroidHogpTransport(context: Context) : HidTransport {
 
     private val mutableForgottenHost = MutableStateFlow(hosts.getString(KEY_CONNECTED, null)?.let { ForgottenHost(it, lostServices = true) })
     override val forgottenHost: StateFlow<ForgottenHost?> = mutableForgottenHost.asStateFlow()
+
+    private val mutableWifiClash = MutableStateFlow(false)
+    override val wifiClash: StateFlow<Boolean> = mutableWifiClash.asStateFlow()
+
+    override fun dismissWifiClash() {
+        mutableWifiClash.value = false
+    }
+
+    /**
+     * Whether the phone is connected to Wi-Fi on 2.4 GHz. Phones share one radio between Wi-Fi and
+     * Bluetooth; on the Redmi Pad SE, 2.4 GHz Wi-Fi made the Windows link time out 4 to 9 times in
+     * 10 minutes, and with Wi-Fi off or on 5 GHz it did not drop once in 10 minutes.
+     */
+    @Suppress("DEPRECATION")
+    private fun onWifi24Ghz(): Boolean {
+        val frequency = runCatching { wifiManager?.connectionInfo?.frequency }.getOrNull() ?: return false
+        return frequency in 2400..2500
+    }
+
+    private val wifiManager: WifiManager? = appContext.getSystemService(WifiManager::class.java)
 
     // Runs while advertising with no host: a paired host that does not come back may have forgotten us.
     private val reconnectCheck = Runnable {
@@ -379,6 +400,7 @@ class AndroidHogpTransport(context: Context) : HidTransport {
             .putString(KEY_LAST_NAME, device.name ?: device.address)
             .apply()
         mutableForgottenHost.value = null
+        if (mutableWifiClash.value && !onWifi24Ghz()) mutableWifiClash.value = false
         subscribed = true
         reports.reset()
         mutableState.value = TransportState.Connected(device.name ?: device.address)
@@ -654,6 +676,10 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                         mainHandler.postDelayed(knownHostCheck, KNOWN_HOST_WAIT_MS)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> if (device == host) {
+                        if (subscribed && !stopped && onWifi24Ghz()) {
+                            Log.d(TAG, "link dropped while on 2.4 GHz Wi-Fi")
+                            mutableWifiClash.value = true
+                        }
                         hosts.edit().remove(KEY_CONNECTED).apply()
                         host = null
                         subscribed = false

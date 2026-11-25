@@ -317,6 +317,15 @@ ships.
   100 ms each, and waits again if one arrives. In that mode it sent about 57 reports a second with
   none refused, and in 30 rounds of Back and reopening (Windows dropped the link in 4), 28 got
   every A press through; the other 2 lost presses while Windows was dropping the link.
+- **The phone's 2.4 GHz Wi-Fi made the link drop.** The drops above were all supervision
+  timeouts: neither side heard the other for 5 s. With the Redmi Pad SE on a 2.4 GHz network
+  (802.11n, −64 dBm), each 10 minutes untouched with Gametap in front had 6, 9 and 4 of them,
+  also with Gametap sending only every 500 ms and with the tablet moved closer. With the tablet's
+  Wi-Fi off, and with it on a 5 GHz iPhone hotspot (802.11ac, 5745 MHz), there were none in 10
+  minutes each. The PC stayed on 2.4 GHz Wi-Fi throughout. Phones share one radio between Wi-Fi
+  and Bluetooth, and an app cannot change how it is shared, so Gametap says so instead: after a
+  link drops while the phone is on 2.4 GHz Wi-Fi, a banner suggests a 5 GHz network or Wi-Fi off,
+  until dismissed or until the phone is off 2.4 GHz at the next connection.
   - **Stop kept the services** (Gametap has no Stop any more, see the next points). It dropped the
     link and stopped advertising, and the link went down 1.1 s after **Disconnect**. Closing Gametap's GATT server removes the services, Windows then
     deletes the gamepad device, and with it gone Windows does not reconnect, even while it sees

@@ -11,6 +11,9 @@ class ConnectionViewModel(private val session: GamepadSession) : ViewModel() {
     val state: StateFlow<TransportState> = session.state
     val permissionDenied: StateFlow<Boolean> = session.permissionDenied
     val forgottenHost: StateFlow<ForgottenHost?> = session.forgottenHost
+    val wifiClash: StateFlow<Boolean> = session.wifiClash
+
+    fun dismissWifiClash() = session.dismissWifiClash()
 
     fun start() = session.start()
 

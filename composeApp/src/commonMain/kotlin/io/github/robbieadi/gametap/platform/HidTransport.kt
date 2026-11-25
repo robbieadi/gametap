@@ -23,6 +23,15 @@ interface HidTransport {
     val forgottenHost: StateFlow<ForgottenHost?> get() = NoForgottenHost
 
     /**
+     * True after the link to a host dropped while the phone was on 2.4 GHz Wi-Fi, which shares the
+     * radio with Bluetooth. Cleared by [dismissWifiClash], or when Wi-Fi is off 2.4 GHz at the next
+     * connection.
+     */
+    val wifiClash: StateFlow<Boolean> get() = NoWifiClash
+
+    fun dismissWifiClash() {}
+
+    /**
      * Told when the app comes to the foreground and leaves it. The transport keeps its host
      * either way; it may advertise or poll less while the app is away.
      */
@@ -46,3 +55,5 @@ interface HidTransport {
 data class ForgottenHost(val name: String, val lostServices: Boolean)
 
 private val NoForgottenHost: StateFlow<ForgottenHost?> = MutableStateFlow(null)
+
+private val NoWifiClash: StateFlow<Boolean> = MutableStateFlow(false)

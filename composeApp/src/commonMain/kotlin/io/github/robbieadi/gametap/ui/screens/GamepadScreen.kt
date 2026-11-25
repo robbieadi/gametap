@@ -37,6 +37,7 @@ import io.github.robbieadi.gametap.layout.screenIssues
 import io.github.robbieadi.gametap.platform.ForgottenHost
 import io.github.robbieadi.gametap.platform.TransportState
 import io.github.robbieadi.gametap.ui.components.ConnectionBanner
+import io.github.robbieadi.gametap.ui.components.WifiClashBanner
 import io.github.robbieadi.gametap.ui.components.FitBanner
 import io.github.robbieadi.gametap.ui.components.GamepadCanvas
 import io.github.robbieadi.gametap.ui.components.GamepadMenu
@@ -53,6 +54,9 @@ fun GamepadScreen(
     permissionDenied: StateFlow<Boolean>,
     /** A paired host that has probably forgotten the gamepad, see HidTransport. */
     forgottenHost: StateFlow<ForgottenHost?>,
+    /** The link dropped while on 2.4 GHz Wi-Fi, see HidTransport. */
+    wifiClash: StateFlow<Boolean>,
+    onDismissWifiClash: () -> Unit,
     /** Asks for Bluetooth again after it was refused, or retries after an error. */
     onTryAgain: () -> Unit,
     /** Opens the editor on the profile with this id. */
@@ -61,6 +65,7 @@ fun GamepadScreen(
     val transport by transportState.collectAsState()
     val denied by permissionDenied.collectAsState()
     val forgotten by forgottenHost.collectAsState()
+    val clash by wifiClash.collectAsState()
     val layout by viewModel.layout.collectAsState()
     val layouts by viewModel.layouts.collectAsState()
     val touchView = viewModel.tracker.view.collectAsState()
@@ -147,6 +152,7 @@ fun GamepadScreen(
                 menuOpen = true
             }
             ConnectionBanner(transport, denied, forgotten, onTryAgain)
+            if (clash) WifiClashBanner(onDismiss = onDismissWifiClash)
             if (showBanner) {
                 FitBanner(onEdit = { onEditLayout(layout.id) }, onDismiss = { dismissedFor = layout to size })
             }

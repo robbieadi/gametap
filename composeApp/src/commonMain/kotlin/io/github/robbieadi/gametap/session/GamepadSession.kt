@@ -44,6 +44,11 @@ class GamepadSession(
     /** See [HidTransport.forgottenHost]. */
     val forgottenHost: StateFlow<ForgottenHost?> = transport.forgottenHost
 
+    /** See [HidTransport.wifiClash]. */
+    val wifiClash: StateFlow<Boolean> = transport.wifiClash
+
+    fun dismissWifiClash() = transport.dismissWifiClash()
+
     // True from Start on. A transport that drops, for example when Bluetooth is turned off, is
     // restarted while the app is visible.
     private var wantsRunning = false
