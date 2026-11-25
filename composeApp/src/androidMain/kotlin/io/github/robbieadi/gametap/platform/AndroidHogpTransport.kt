@@ -52,7 +52,8 @@ import java.util.UUID
  * - The host is reported as connected once notifications are on for the input report. Android
  *   does not keep that setting between connections, so it is saved per bonded host here: BlueZ
  *   writes it on every connect, but Windows reconnects a bonded gamepad without writing it again,
- *   and Gametap then sent nothing.
+ *   and Gametap then sent nothing. It is restored 1 s after connecting, unless the host has
+ *   started pairing again by then (see [KNOWN_HOST_WAIT_MS]).
  * - [stop] drops the link and stops advertising but keeps the services. The app no longer stops
  *   the gamepad (see GamepadSession); only a crash calls this, before exiting.
  *   Removing the services made Windows delete the gamepad device, even with the link already
@@ -60,7 +61,13 @@ import java.util.UUID
  *   stopped connecting at all.
  * - The app also opens a GATT client back to the host on the same link and asks for high
  *   priority, which requests an 11.25 to 15 ms connection interval. Android gives a GATT server no
- *   way to ask for that itself. On Linux this halved the spread of report delays.
+ *   way to ask for that itself. On Linux this halved the spread of report delays. It opens only
+ *   on an encrypted link with no pairing under way: when the host turns notifications on, when
+ *   pairing with it completes, or 1 s after a bonded host connects without pairing again (Windows
+ *   reconnects without writing anything). Opened while a host was pairing, also a bonded host
+ *   pairing again, Android's first read through it (the host's database hash) got no answer from
+ *   BlueZ, and after 30 s Android dropped the link and stopped handing later connections to
+ *   Gametap until Bluetooth was restarted.
  */
 @SuppressLint("MissingPermission")
 class AndroidHogpTransport(context: Context) : HidTransport {
@@ -298,13 +305,41 @@ class AndroidHogpTransport(context: Context) : HidTransport {
         }
     }
 
-    /** A host that is unpaired forgets its notification setting, so a new pairing starts clean. */
+    /**
+     * A host that is unpaired, or pairs again, forgets its notification setting, so a new pairing
+     * starts clean. Pairing with the connected host also decides when the priority client opens.
+     */
     private val bondReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR) != BluetoothDevice.BOND_NONE) return
             @Suppress("DEPRECATION")
             val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
-            subscriptions.edit().remove(device.address).apply()
+            when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
+                BluetoothDevice.BOND_NONE -> subscriptions.edit().remove(device.address).apply()
+                // A bonded host pairing again, for example after removing the phone on the PC.
+                // The new pairing turns notifications on again itself.
+                BluetoothDevice.BOND_BONDING -> {
+                    subscriptions.edit().remove(device.address).apply()
+                    synchronized(lock) { if (device == host) mainHandler.removeCallbacks(knownHostCheck) }
+                }
+                BluetoothDevice.BOND_BONDED -> synchronized(lock) {
+                    if (device == host) openPriorityClientLocked(device)
+                }
+            }
+        }
+    }
+
+    /**
+     * For a bonded host that has not started pairing again: restores its notification setting
+     * and opens the priority client. See [KNOWN_HOST_WAIT_MS].
+     */
+    private val knownHostCheck = Runnable {
+        synchronized(lock) {
+            val device = host ?: return@Runnable
+            if (stopped || device.bondState != BluetoothDevice.BOND_BONDED) return@Runnable
+            val saved = subscriptions.getBoolean(device.address, false)
+            Log.d(TAG, "notifications saved as ${if (saved) "on" else "off"} for ${device.address}")
+            if (saved && !subscribed) onSubscribedLocked(device)
+            openPriorityClientLocked(device)
         }
     }
 
@@ -569,17 +604,15 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                         subscribed = false
                         reports.reset()
                         stopAdvertisingLocked()
-                        openPriorityClientLocked(device)
-                        val saved = device.bondState == BluetoothDevice.BOND_BONDED &&
-                            subscriptions.getBoolean(device.address, false)
-                        Log.d(TAG, "notifications saved as ${if (saved) "on" else "off"} for ${device.address}")
-                        if (saved) onSubscribedLocked(device)
+                        mainHandler.removeCallbacks(knownHostCheck)
+                        mainHandler.postDelayed(knownHostCheck, KNOWN_HOST_WAIT_MS)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> if (device == host) {
                         hosts.edit().remove(KEY_CONNECTED).apply()
                         host = null
                         subscribed = false
                         reports.reset()
+                        mainHandler.removeCallbacks(knownHostCheck)
                         closePriorityClientLocked()
                         if (server != null && !stopped) {
                             mutableState.value = TransportState.Advertising
@@ -645,6 +678,8 @@ class AndroidHogpTransport(context: Context) : HidTransport {
                         }
                         if (enabled) {
                             onSubscribedLocked(device)
+                            // Android accepts this write only on an encrypted link.
+                            openPriorityClientLocked(device)
                         } else {
                             subscribed = false
                             reports.reset()
@@ -685,6 +720,15 @@ class AndroidHogpTransport(context: Context) : HidTransport {
 
         // Windows reconnected 0.2 to 38 s after advertising began, or after its radio came back.
         const val RECONNECT_WAIT_MS = 60_000L
+
+        /**
+         * How long a bonded host has to start pairing again before it is treated as known. A host
+         * that pairs again started 0.13 to 0.23 s after connecting (four times, BlueZ). Before
+         * that, nothing may go out: input reports sent from 0.08 s after connecting, restored
+         * from the old bond, made BlueZ start its GATT client unencrypted, mid-pairing; its HID
+         * reads were refused and it never created the gamepad.
+         */
+        const val KNOWN_HOST_WAIT_MS = 1_000L
 
         const val KEY_CONNECTED = "connected"
         const val KEY_LAST_ADDRESS = "last_address"

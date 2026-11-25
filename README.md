@@ -178,27 +178,60 @@ Bluetooth mode reports `045E:02E0` (Xbox One S).
 - **The IDs are Microsoft's.** USB-IF rules reserve a vendor ID to the company it is assigned to,
   and app stores may treat presenting as another company's hardware as misrepresentation. Avoid
   Xbox names and logos in the app and its store listing.
-- **Checked on Windows and Linux with Android; not yet on macOS or with an iPhone.** On Linux,
-  BlueZ may use the phone's own IDs for the first connection, see [Linux hosts](#linux-hosts).
+- **Checked on Windows and Linux with Android; not yet on macOS or with an iPhone.** Linux does
+  not always use the Xbox IDs: on the first connection after pairing it has none, and later it
+  may use the phone's own, see [Linux hosts](#linux-hosts).
 
 ### Linux hosts
 
 These were found with BlueZ 5.87 and 5.88. Other desktops and BlueZ versions may differ.
 
-- **It is an Xbox controller to Linux.** Checked with BlueZ 5.88 and a Redmi Pad SE. With the
-  Xbox IDs, the kernel binds its `microsoft` driver, and Steam's SDL names it "Xbox Series X
+- **It is an Xbox controller to Linux when BlueZ uses the Xbox IDs**, which it does not always,
+  see the next points. Checked with BlueZ 5.88 and a Redmi Pad SE. With the Xbox IDs, the kernel binds its `microsoft` driver, and Steam's SDL names it "Xbox Series X
   Controller" with its built-in mapping and Steam's Xbox configuration. Every control arrives in
   evdev, checked one at a time: the 11 buttons (`BTN_SOUTH` to `BTN_THUMBR`), the D-pad as
   `ABS_HAT0X`/`ABS_HAT0Y`, the sticks as `ABS_X`/`ABS_Y` and `ABS_Z`/`ABS_RZ` (about 660 to 64840,
   both directions), and the triggers as analog `ABS_BRAKE` (left) and `ABS_GAS` (right).
 - **Linux reconnects by itself, also after Gametap's process ends.** After the PC disconnected
   it, the gamepad was back in 0.55 to 0.65 s (three times); after a force stop and opening
-  Gametap again, in 3.7 s. Unlike Windows, the gamepad kept its Xbox IDs each time. A press
-  reached evdev after the restart and after 30 s in the background.
+  Gametap again, in 3.7 s. The gamepad kept its Xbox IDs each time; the phone had no classic
+  Bluetooth connection to the PC during these tests. A press reached evdev after the restart and
+  after 30 s in the background.
+- **The first connection after pairing has no IDs.** The gamepad is `0000:0000`, the kernel uses
+  its generic HID driver, and Steam names it after the phone ("Redmi Pad SE") with a generic
+  mapping. Every control still works. BlueZ 5.88 (`profiles/input/hog.c`) takes the IDs it
+  already has for the device when the connection starts, and its `deviceinfo` plugin reads
+  Gametap's PnP ID at the same time, too late for that gamepad. Moving Device Information before
+  the HID service did not change this. From the next connection on, BlueZ uses the IDs it then
+  has on record, see the next point.
+- **Later connections use the IDs BlueZ saw last.** BlueZ keeps one vendor and product ID per
+  device, written by Gametap's PnP ID or by the phone's own classic Bluetooth record (`038F:1200`
+  on the Redmi Pad SE), whichever it read last. It reads the phone's record whenever the phone
+  connects over classic Bluetooth, for example for audio (see "Phones send their audio to the
+  PC" below, which also turns that off). To get the Xbox IDs back, disconnect
+  the gamepad once while the phone has no classic connection to the PC.
 - **No new pairing was needed for the Xbox identity.** A PC paired before the change read the
-  new Report Map by itself. The first connection, though, used the IDs from the phone's own
-  record (`038F:1200`, the generic HID driver, and a generic Steam mapping); from the next
-  connection on it had the Xbox IDs. If that happens, disconnect the gamepad once from the PC.
+  new Report Map by itself.
+- **Gametap sends nothing until pairing is done.** Two bugs, both found with BlueZ 5.88 and fixed:
+  - Gametap opened its connection-priority client (see [Latency](#latency)) as soon as the PC
+    connected. During pairing, Android's first read through it got no answer from BlueZ, and 30 s
+    later Android dropped the link. Android then kept accepting connections from the PC without
+    passing them to Gametap, so the gamepad did not come back until Bluetooth was turned off and
+    on on the phone.
+  - When the phone was removed only on the PC and paired again, the phone still had its old
+    bond, and Gametap restored that host's saved notification setting at once and sent input
+    reports 0.08 s after the PC connected, mid-pairing. An HCI capture showed BlueZ then starting
+    its GATT client unencrypted, 0.14 s after connecting; its HID reads were refused with
+    Insufficient Encryption, it tried each twice and never created the gamepad. In a clean
+    pairing BlueZ sent nothing until 0.09 s after encryption.
+
+  Now a bonded host's setting is restored, and the client opened, 1 s after it connects, unless
+  it starts pairing first (0.13 to 0.23 s after connecting, four times); a pairing drops the
+  saved setting, since the PC turns notifications on again itself. Otherwise the client opens
+  when the PC turns on notifications or pairing completes. A clean pairing and pairing again
+  after removing the phone only on the PC both then created the gamepad and stayed connected.
+  Windows, which does not turn notifications on again when it reconnects, now gets input 1 s
+  after connecting; not yet retested on Windows.
 
 - **A pairing agent must be running.** Pairing needs a 6-digit code confirmed on both sides, and
   BlueZ hands that to a separate agent program. GNOME, KDE and shells such as Noctalia include
@@ -235,12 +268,11 @@ These were found with BlueZ 5.87 and 5.88. Other desktops and BlueZ versions may
   `~/.config/wireplumber/wireplumber.conf.d/51-no-phone-audio.conf` with
   `monitor.bluez.properties = { bluez5.roles = [ a2dp_source hfp_ag bap_source ] }` and run
   `systemctl --user restart wireplumber`.
-- **The gamepad may show the phone's name and ID.** BlueZ names the gamepad after the phone and
-  takes the vendor and product ID from the device record it saw last: the phone's own classic
-  Bluetooth record (for example Apple 004C:7504) or Gametap's PnP ID. The ID can change between
-  connections, so Steam may treat it as a new controller. With BlueZ 5.88 this happened only on
-  the first connection after the Xbox identity change, see above. Apps cannot change this; the
-  fix would be in BlueZ.
+- **The gamepad may show the phone's name and ID.** BlueZ names the gamepad after the phone, and
+  its ID can be none, the phone's own (for example Apple 004C:7504) or Gametap's, see the first
+  points. The ID can change between connections, so Steam may treat it as a new controller. Apps
+  cannot change this; the fix would be in BlueZ, for example by creating the gamepad again when
+  the PnP ID arrives, or by preferring the Low Energy PnP ID for a Low Energy gamepad.
 
 ### Windows hosts
 
@@ -270,7 +302,8 @@ ships.
   - **Windows does not turn notifications on again when it reconnects**, as the Bluetooth spec
     allows for a bonded device. Gametap used to wait for that, so Windows did reconnect, but
     Gametap kept showing "Waiting for a host" and sent nothing. Gametap now saves the setting for
-    each bonded host and restores it when that host connects; unpairing on the phone forgets it.
+    each bonded host and restores it 1 s after that host connects, unless it pairs again (see
+    [Linux hosts](#linux-hosts)); unpairing on the phone, or pairing again, forgets it.
   - **Stop kept the services** (Gametap has no Stop any more, see the next points). It dropped the
     link and stopped advertising, and the link went down 1.1 s after **Disconnect**. Closing Gametap's GATT server removes the services, Windows then
     deletes the gamepad device, and with it gone Windows does not reconnect, even while it sees
