@@ -40,6 +40,18 @@ cd iosApp && xcodegen generate && open iosApp.xcodeproj
 
 Set your signing team in Xcode, then run on a real device. The simulator has no Bluetooth.
 
+### iOS without a Mac
+
+The **iOS build** GitHub Actions workflow builds an unsigned `Gametap.ipa` on a macOS runner,
+on every push to `main` that touches the app and on demand from the Actions tab (**Run
+workflow**). Download the `Gametap-ipa` artifact from the run, unzip it, then sign and install
+the `.ipa` from Windows with [Sideloadly](https://sideloadly.io) or AltStore and your Apple ID,
+with the iPhone connected by USB. On iOS 16 and later, also turn on **Settings → Privacy &
+Security → Developer Mode**.
+
+With a free Apple ID the install expires after 7 days and at most 3 sideloaded apps can be
+installed at once. With the paid Apple Developer Program it lasts a year.
+
 ## Using it
 
 1. Open Gametap and allow the Bluetooth prompts. It opens straight on the gamepad, always in
