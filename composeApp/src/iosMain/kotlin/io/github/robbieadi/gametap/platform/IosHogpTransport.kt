@@ -85,6 +85,8 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     // By characteristic, not UUID: the input and output reports share the Report UUID.
     private val staticValues = ArrayList<Pair<CBMutableCharacteristic, ByteArray>>()
     private val pendingServices = HashSet<String>()
+    // Added once Device Information is published, see publishServices.
+    private var pendingHidService: CBMutableService? = null
 
     private var latestReport: ByteArray = HidReportEncoder.encode(GamepadState())
 
@@ -122,6 +124,7 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         reportCharacteristic = null
         reports.reset()
         pendingServices.clear()
+        pendingHidService = null
     }
 
     fun send(data: ByteArray): Boolean {
@@ -142,7 +145,14 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         }
         pendingServices.clear()
         services.forEach { pendingServices.add(it.UUID.UUIDString) }
-        services.forEach(peripheral::addService)
+        // iOS publishes its own Device Information service first, without a PnP ID, and Windows
+        // reads that one. The HID service includes Gametap's, in case Windows looks there; an
+        // included service must be published first, so the HID service waits for it.
+        val hid = services.first { it.UUID.UUIDString == cbUuid(HogpProfile.HID_SERVICE).UUIDString }
+        val deviceInfo = services.firstOrNull { it.UUID.UUIDString == cbUuid(HogpProfile.DEVICE_INFO_SERVICE).UUIDString }
+        pendingHidService = if (deviceInfo != null) hid else null
+        services.filter { it !== hid }.forEach(peripheral::addService)
+        if (deviceInfo == null) peripheral.addService(hid)
     }
 
     /** Values are served from read requests, since iOS restricts characteristics with cached values. */
@@ -207,6 +217,13 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     override fun peripheralManager(peripheral: CBPeripheralManager, didAddService: CBService, error: NSError?) {
         val uuid = didAddService.UUID.UUIDString
         pendingServices.remove(uuid)
+        val hid = pendingHidService
+        if (hid != null && uuid == cbUuid(HogpProfile.DEVICE_INFO_SERVICE).UUIDString) {
+            pendingHidService = null
+            if (error == null) hid.setIncludedServices(listOf(didAddService))
+            peripheral.addService(hid)
+            return
+        }
         if (error != null && uuid == cbUuid(HogpProfile.HID_SERVICE).UUIDString) {
             pendingServices.clear()
             mutableState.value = TransportState.Error("iOS refused the HID service: ${error.localizedDescription}")
