@@ -166,9 +166,9 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
             properties = properties or
                 if (encrypted) CBCharacteristicPropertyNotifyEncryptionRequired else CBCharacteristicPropertyNotify
         }
-        val characteristic = CBMutableCharacteristic(cbUuid(spec.uuid), properties, null, permissions)
+        val characteristic = CBMutableCharacteristic(shortUuid(spec.uuid), properties, null, permissions)
         spec.reportReference?.let {
-            characteristic.setDescriptors(listOf(CBMutableDescriptor(cbUuid(HogpProfile.REPORT_REFERENCE), it.toNSData())))
+            characteristic.setDescriptors(listOf(CBMutableDescriptor(shortUuid(HogpProfile.REPORT_REFERENCE), it.toNSData())))
         }
         spec.value?.let { staticValues += characteristic to it }
         if (spec.uuid == HogpProfile.REPORT && spec.notifies) reportCharacteristic = characteristic
@@ -275,7 +275,16 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     }
 }
 
+/** Services only: iOS refuses the 16-bit form of reserved services but publishes the 128-bit one. */
 private fun cbUuid(short: Int): CBUUID = CBUUID.UUIDWithString(HogpProfile.uuidString(short))
+
+/**
+ * Characteristics and descriptors keep the 16-bit form. iOS sends a 128-bit UUID as given, and hosts
+ * then miss the PnP ID: iPhoneGamepad (github.com/Shuddown/iPhoneGamepad) saw zero vendor and
+ * product IDs on macOS and iPadOS with 128-bit characteristics, and the Xbox IDs with 16-bit ones.
+ */
+private fun shortUuid(short: Int): CBUUID =
+    CBUUID.UUIDWithString(short.toString(16).uppercase().padStart(4, '0'))
 
 private fun onMain(block: () -> Unit) = dispatch_async(dispatch_get_main_queue(), block)
 
