@@ -84,8 +84,9 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     private var reportMap: ByteArray = ByteArray(0)
     // By characteristic, not UUID: the input and output reports share the Report UUID.
     private val staticValues = ArrayList<Pair<CBMutableCharacteristic, ByteArray>>()
-    private val pendingServices = HashSet<String>()
-    // Added once Device Information is published, see publishServices.
+    // Services added but not yet confirmed by didAddService; advertising starts at zero.
+    private var pendingServiceCount = 0
+    // Added once the secondary Device Information service it includes is published.
     private var pendingHidService: CBMutableService? = null
 
     private var latestReport: ByteArray = HidReportEncoder.encode(GamepadState())
@@ -123,7 +124,7 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
         manager = null
         reportCharacteristic = null
         reports.reset()
-        pendingServices.clear()
+        pendingServiceCount = 0
         pendingHidService = null
     }
 
@@ -138,21 +139,30 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     private fun publishServices(peripheral: CBPeripheralManager) {
         if (reportCharacteristic != null) return
         staticValues.clear()
-        val services = HogpProfile.services(reportMap).map { service ->
+        val profile = HogpProfile.services(reportMap)
+        val services = profile.map { service ->
             CBMutableService(cbUuid(service.uuid), true).apply {
                 setCharacteristics(service.characteristics.map(::toCoreBluetooth))
             }
         }
-        pendingServices.clear()
-        services.forEach { pendingServices.add(it.UUID.UUIDString) }
-        // iOS publishes its own Device Information service first, without a PnP ID, and Windows
-        // reads that one. The HID service includes Gametap's, in case Windows looks there; an
-        // included service must be published first, so the HID service waits for it.
         val hid = services.first { it.UUID.UUIDString == cbUuid(HogpProfile.HID_SERVICE).UUIDString }
-        val deviceInfo = services.firstOrNull { it.UUID.UUIDString == cbUuid(HogpProfile.DEVICE_INFO_SERVICE).UUIDString }
-        pendingHidService = if (deviceInfo != null) hid else null
+        // iOS publishes its own Device Information service first, without a PnP ID. As the primary
+        // instance it describes the phone; Device Information 1.2 lets a secondary instance,
+        // included in another service, describe what that service is. So the HID service includes
+        // a secondary copy of Gametap's. An included service must be published first.
+        val secondaryDeviceInfo = profile.firstOrNull { it.uuid == HogpProfile.DEVICE_INFO_SERVICE }?.let { spec ->
+            CBMutableService(cbUuid(spec.uuid), false).apply {
+                setCharacteristics(spec.characteristics.map(::toCoreBluetooth))
+            }
+        }
+        pendingServiceCount = services.size + if (secondaryDeviceInfo != null) 1 else 0
         services.filter { it !== hid }.forEach(peripheral::addService)
-        if (deviceInfo == null) peripheral.addService(hid)
+        if (secondaryDeviceInfo != null) {
+            pendingHidService = hid
+            peripheral.addService(secondaryDeviceInfo)
+        } else {
+            peripheral.addService(hid)
+        }
     }
 
     /** Values are served from read requests, since iOS restricts characteristics with cached values. */
@@ -216,21 +226,21 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
 
     override fun peripheralManager(peripheral: CBPeripheralManager, didAddService: CBService, error: NSError?) {
         val uuid = didAddService.UUID.UUIDString
-        pendingServices.remove(uuid)
+        pendingServiceCount--
         val hid = pendingHidService
-        if (hid != null && uuid == cbUuid(HogpProfile.DEVICE_INFO_SERVICE).UUIDString) {
+        if (hid != null && !didAddService.isPrimary && uuid == cbUuid(HogpProfile.DEVICE_INFO_SERVICE).UUIDString) {
             pendingHidService = null
             if (error == null) hid.setIncludedServices(listOf(didAddService))
             peripheral.addService(hid)
             return
         }
         if (error != null && uuid == cbUuid(HogpProfile.HID_SERVICE).UUIDString) {
-            pendingServices.clear()
+            pendingServiceCount = 0
             mutableState.value = TransportState.Error("iOS refused the HID service: ${error.localizedDescription}")
             return
         }
         // Device Information and Battery are optional: iOS may reserve them, and hosts still work.
-        if (pendingServices.isEmpty()) startAdvertising(peripheral)
+        if (pendingServiceCount <= 0) startAdvertising(peripheral)
     }
 
     override fun peripheralManagerDidStartAdvertising(peripheral: CBPeripheralManager, error: NSError?) {
