@@ -48,7 +48,10 @@ private class FakeClock(private val scheduler: TestCoroutineScheduler) : TimeSou
     }
 }
 
-private class FakeTransport(initial: TransportState = TransportState.Connected("host")) : HidTransport {
+private class FakeTransport(
+    initial: TransportState = TransportState.Connected("host"),
+    override val addsTriggerAxes: Boolean = false,
+) : HidTransport {
     override val state = MutableStateFlow(initial)
     val sent = MutableSharedFlow<List<Int>>(extraBufferCapacity = 256)
     var accept = true
@@ -115,6 +118,21 @@ class ReportSenderTest {
             input.set(GamepadState(buttons = Button.A.mask))
             runCurrent()
             assertEquals(1, awaitItem()[BUTTONS_LOW])
+        }
+    }
+
+    @Test
+    fun transportWithTriggerAxesGetsTheTriggersTwice() = runTest {
+        val transport = FakeTransport(addsTriggerAxes = true)
+        transport.sent.test {
+            startSender(transport)
+            assertEquals(HidReportEncoder.REPORT_SIZE_WITH_TRIGGER_AXES, awaitItem().size)
+
+            input.set(GamepadState(leftTrigger = 1f))
+            runCurrent()
+            val report = awaitItem()
+            assertEquals(HidReportEncoder.TRIGGER_MAX, report.u16(LEFT_TRIGGER))
+            assertEquals(HidReportEncoder.TRIGGER_MAX, report.u16(HidReportEncoder.REPORT_SIZE))
         }
     }
 

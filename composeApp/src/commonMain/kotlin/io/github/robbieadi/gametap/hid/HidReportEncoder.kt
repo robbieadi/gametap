@@ -14,6 +14,18 @@ object HidReportEncoder {
     const val STICK_CENTER: Int = 0x8000
     const val TRIGGER_MAX: Int = 1023
 
+    /** Size of a report from [withTriggerAxes]. */
+    const val REPORT_SIZE_WITH_TRIGGER_AXES: Int = REPORT_SIZE + 4
+
+    /**
+     * [report] followed by both triggers again, for [HidDescriptor.bytesWithTriggerAxes]. Bytes 8-11
+     * already hold the triggers as 16-bit values, so they are copied as they are.
+     */
+    fun withTriggerAxes(report: ByteArray): ByteArray {
+        require(report.size == REPORT_SIZE) { "expected a $REPORT_SIZE-byte report, got ${report.size}" }
+        return report + report.copyOfRange(8, 12)
+    }
+
     fun encode(state: GamepadState): ByteArray {
         val report = ByteArray(REPORT_SIZE)
         report.put16(0, stick(state.leftStick.x))

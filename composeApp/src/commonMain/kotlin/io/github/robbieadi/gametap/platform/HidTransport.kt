@@ -32,6 +32,14 @@ interface HidTransport {
     fun dismissWifiClash() {}
 
     /**
+     * True when hosts never see this phone as an Xbox controller and use their generic gamepad
+     * driver instead: the iPhone, whose own Device Information service, without a PnP ID, is the
+     * one hosts read. The descriptor and reports then also carry the triggers on standard axes,
+     * see HidDescriptor.bytesWithTriggerAxes.
+     */
+    val addsTriggerAxes: Boolean get() = false
+
+    /**
      * Told when the app comes to the foreground and leaves it. The transport keeps its host
      * either way; it may advertise or poll less while the app is away.
      */

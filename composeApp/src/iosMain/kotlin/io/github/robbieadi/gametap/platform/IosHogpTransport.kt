@@ -67,6 +67,10 @@ class IosHogpTransport : HidTransport {
 
     override val state: StateFlow<TransportState> = peripheral.state
 
+    // Hosts read iOS's own Device Information service, which has no PnP ID, so none of them sees
+    // the Xbox identity and Windows' generic driver would drop the triggers.
+    override val addsTriggerAxes: Boolean = true
+
     override suspend fun start(descriptor: ByteArray) = peripheral.start(descriptor)
 
     override suspend fun stop() = peripheral.stop()
@@ -86,7 +90,7 @@ private class HogpPeripheral : NSObject(), CBPeripheralManagerDelegateProtocol {
     private val staticValues = ArrayList<Pair<CBMutableCharacteristic, ByteArray>>()
     private val pendingServices = HashSet<String>()
 
-    private var latestReport: ByteArray = HidReportEncoder.encode(GamepadState())
+    private var latestReport: ByteArray = HidReportEncoder.withTriggerAxes(HidReportEncoder.encode(GamepadState()))
 
     // updateValue refuses a report when iOS's queue is full and calls
     // peripheralManagerIsReadyToUpdateSubscribers once there is room; accepted reports need no

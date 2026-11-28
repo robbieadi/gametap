@@ -3,6 +3,7 @@
 package io.github.robbieadi.gametap
 
 import io.github.robbieadi.gametap.domain.DeadzoneCurve
+import io.github.robbieadi.gametap.hid.HidDescriptor
 import io.github.robbieadi.gametap.input.InputStateHolder
 import io.github.robbieadi.gametap.input.ReportSender
 import io.github.robbieadi.gametap.platform.BluetoothAccess
@@ -24,11 +25,13 @@ import kotlinx.coroutines.test.setMain
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
-private class StartingTransport : HidTransport {
+private class StartingTransport(override val addsTriggerAxes: Boolean = false) : HidTransport {
     override val state = MutableStateFlow<TransportState>(TransportState.Idle)
     var starts = 0
+    var descriptor: ByteArray? = null
     var stops = 0
     val foregroundCalls = mutableListOf<Boolean>()
 
@@ -38,6 +41,7 @@ private class StartingTransport : HidTransport {
 
     override suspend fun start(descriptor: ByteArray) {
         starts++
+        this.descriptor = descriptor
         state.value = TransportState.Advertising
     }
 
@@ -111,6 +115,17 @@ class GamepadSessionTest {
         assertEquals(1, transport.starts)
         assertEquals(TransportState.Advertising, transport.state.value)
         assertEquals(true, keepAlive.running)
+    }
+
+    @Test
+    fun publishesTheTriggerAxesDescriptorOnlyWhenTheTransportAddsThem() = runTest(dispatcher) {
+        val xbox = StartingTransport()
+        val iphone = StartingTransport(addsTriggerAxes = true)
+        session(xbox).start()
+        session(iphone).start()
+        runCurrent()
+        assertContentEquals(HidDescriptor.bytes, xbox.descriptor)
+        assertContentEquals(HidDescriptor.bytesWithTriggerAxes, iphone.descriptor)
     }
 
     @Test

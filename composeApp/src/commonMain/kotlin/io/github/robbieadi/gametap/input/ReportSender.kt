@@ -69,7 +69,7 @@ class ReportSender(
     }
 
     private fun encode(state: GamepadState, motion: GyroOutput): ByteArray {
-        return HidReportEncoder.encode(
+        val report = HidReportEncoder.encode(
             state.copy(
                 leftStick = stickCurve(Side.LEFT).apply(state.leftStick) + motion.leftStick,
                 rightStick = stickCurve(Side.RIGHT).apply(state.rightStick) + motion.rightStick,
@@ -77,6 +77,7 @@ class ReportSender(
                 rightTrigger = maxOf(state.rightTrigger, motion.rightTrigger),
             ),
         )
+        return if (transport.addsTriggerAxes) HidReportEncoder.withTriggerAxes(report) else report
     }
 
     private operator fun Stick.plus(other: Stick): Stick =

@@ -16,6 +16,16 @@ class HidReportEncoderTest {
     private fun List<Int>.u16(offset: Int) = this[offset] or (this[offset + 1] shl 8)
 
     @Test
+    fun triggerAxesRepeatBothTriggersAfterTheXboxFields() {
+        val report = HidReportEncoder.encode(GamepadState(leftTrigger = 1f, rightTrigger = 0.5f))
+        val extended = HidReportEncoder.withTriggerAxes(report).map { it.toInt() and 0xFF }
+        assertEquals(HidReportEncoder.REPORT_SIZE_WITH_TRIGGER_AXES, extended.size)
+        assertEquals(report.map { it.toInt() and 0xFF }, extended.take(HidReportEncoder.REPORT_SIZE))
+        assertEquals(HidReportEncoder.TRIGGER_MAX, extended.u16(16))
+        assertEquals(extended.u16(10), extended.u16(18))
+    }
+
+    @Test
     fun neutralState() {
         assertContentEquals(
             listOf(0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0, 0, 0, 0, 0, 0, 0, 0),

@@ -9,6 +9,8 @@ package io.github.robbieadi.gametap.hid
  * report by fixed offsets, so the layout must stay byte for byte the same. Taken from
  * ESP32-BLE-CompositeHID (MIT), XboxDescriptors.h, XboxOneS_1914_HIDDescriptor; the offsets match
  * SDL's HIDAPI_DriverXboxOneBluetooth_HandleStatePacket.
+ *
+ * The iPhone publishes [bytesWithTriggerAxes] instead, which adds fields after the Xbox ones.
  */
 object HidDescriptor {
     const val REPORT_ID: Int = 1
@@ -19,7 +21,7 @@ object HidDescriptor {
     /** Payload of the output report, without its ID: actuators, four magnitudes, duration, delay, loops. */
     const val OUTPUT_REPORT_SIZE: Int = 8
 
-    private val values = intArrayOf(
+    private val inputItems = intArrayOf(
         0x05, 0x01,                     // Usage Page (Generic Desktop)
         0x09, 0x05,                     // Usage (Game Pad)
         0xA1, 0x01,                     // Collection (Application)
@@ -125,7 +127,22 @@ object HidDescriptor {
         0x75, 0x07,                     //   Report Size (7)
         0x95, 0x01,                     //   Report Count (1)
         0x81, 0x03,                     //   Input (Const, Var, Abs)
+    )
 
+    /** iPhone only, see [bytesWithTriggerAxes]. */
+    private val triggerAxisItems = intArrayOf(
+        // Bytes 16-19: both triggers again, on Generic Desktop axes, 16 bits each
+        0x05, 0x01,                     //   Usage Page (Generic Desktop)
+        0x09, 0x36,                     //   Usage (Slider): left trigger
+        0x09, 0x37,                     //   Usage (Dial): right trigger
+        0x15, 0x00,                     //   Logical Minimum (0)
+        0x26, 0xFF, 0x03,               //   Logical Maximum (1023)
+        0x75, 0x10,                     //   Report Size (16)
+        0x95, 0x02,                     //   Report Count (2)
+        0x81, 0x02,                     //   Input (Data, Var, Abs)
+    )
+
+    private val outputItems = intArrayOf(
         // Output report 3: rumble
         0x05, 0x0F,                     //   Usage Page (Physical Interface Device)
         0x09, 0x21,                     //   Usage (Set Effect Report)
@@ -175,5 +192,18 @@ object HidDescriptor {
     )
 
     /** Returns a fresh copy, so callers cannot alter the shared descriptor. */
-    val bytes: ByteArray get() = ByteArray(values.size) { values[it].toByte() }
+    val bytes: ByteArray get() = toBytes(inputItems + outputItems)
+
+    /**
+     * [bytes] with both triggers repeated after the Xbox fields, as Slider (left) and Dial (right),
+     * for a phone that hosts never see as an Xbox controller: the iPhone, whose own Device
+     * Information service, without a PnP ID, is the one hosts read. Windows' generic gamepad driver
+     * drops the Brake and Accelerator usages of the Xbox triggers but passes Slider and Dial on.
+     * Linux maps them to ABS_THROTTLE and ABS_RUDDER, which SDL's automatic mapping leaves alone, so
+     * it keeps using ABS_BRAKE and ABS_GAS. The Xbox fields keep their offsets. Reports then come
+     * from [HidReportEncoder.withTriggerAxes].
+     */
+    val bytesWithTriggerAxes: ByteArray get() = toBytes(inputItems + triggerAxisItems + outputItems)
+
+    private fun toBytes(items: IntArray) = ByteArray(items.size) { items[it].toByte() }
 }

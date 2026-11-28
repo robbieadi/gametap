@@ -93,7 +93,7 @@ class GamepadSession(
                 return@launch
             }
             keepAlive.start()
-            transport.start(HidDescriptor.bytes)
+            transport.start(if (transport.addsTriggerAxes) HidDescriptor.bytesWithTriggerAxes else HidDescriptor.bytes)
         }
     }
 }
